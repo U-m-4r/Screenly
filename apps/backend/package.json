@@ -7,6 +7,7 @@
     "@types/bun": "latest",
     "@types/cors": "^2.8.19",
     "@types/pg": "^8.23.1",
+    "@types/ws": "^8.18.1",
     "prisma": "7"
   },
   "peerDependencies": {
@@ -22,6 +23,7 @@
     "dotenv": "^18.0.2",
     "express": "^5.2.1",
     "pg": "^8.23.0",
+    "ws": "^8.21.3",
     "zod": "^4.6.5"
   }
 }
