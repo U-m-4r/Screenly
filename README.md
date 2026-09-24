@@ -10,7 +10,7 @@ experience with Deepgram-powered audio support.
 - **Frontend:** React 19, Bun, Tailwind CSS, Radix UI
 - **Backend:** Bun, Express, TypeScript, Zod
 - **Data:** PostgreSQL with Prisma 7
-- **Integrations:** GitHub API and Deepgram
+- **Integrations:** GitHub API, Deepgram, and Groq
 - **Workspace:** Turborepo
 
 ## Project Structure
@@ -32,6 +32,7 @@ packages/
 - A PostgreSQL database
 - GitHub token with permission to read public repository data
 - Deepgram API key
+- Groq API key for post-interview evaluation
 
 ## Getting Started
 
@@ -82,6 +83,7 @@ The root `.gitignore` excludes local `.env` files, so never commit credentials.
 | `DATABASE_URL`     | PostgreSQL connection string used by Prisma            |
 | `DEEPGRAM_API_KEY` | Deepgram API key used to create temporary audio tokens |
 | `GITHUB_TOKEN`     | GitHub token used to fetch a user's repositories       |
+| `GROQ_API_KEY`     | Groq API key used to evaluate completed interviews    |
 
 ## API Endpoints
 
@@ -110,6 +112,20 @@ The response contains the created interview ID:
 }
 ```
 
+### `GET /api/v1/results/:id`
+
+Returns the interview status, persisted evaluation, and authoritative
+conversation transcript for the supplied interview ID. Evaluation is created
+when the interview ends and includes an overall score, category scores,
+summary, strengths, improvements, and discussed topics.
+
+### WebSocket `/ws/interview/:id`
+
+The interview client sends microphone audio and an `end` control message. The
+backend manages the Deepgram connection, persists the transcript, and evaluates
+the completed interview. The browser does not send transcript or evaluation
+data.
+
 ## Development Commands
 
 Run these commands from the repository root:
@@ -123,5 +139,6 @@ bun run format      # Format TypeScript and Markdown files
 
 ## Status
 
-Screenly is under active development. LinkedIn profile enrichment and the
-remaining interview conversation flow are planned next.
+Screenly is under active development. The interview pipeline, transcript
+persistence, and post-interview evaluation are implemented; the results view
+is still being expanded.

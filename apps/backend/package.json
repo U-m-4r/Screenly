@@ -3,6 +3,9 @@
   "module": "index.ts",
   "type": "module",
   "private": true,
+  "scripts": {
+    "check-types": "tsc --noEmit"
+  },
   "devDependencies": {
     "@types/bun": "latest",
     "@types/cors": "^2.8.19",
@@ -15,6 +18,7 @@
   },
   "dependencies": {
     "@deepgram/sdk": "^5.12.0",
+    "@google/genai": "^2.24.0",
     "@prisma/adapter-pg": "7",
     "@prisma/client": "7",
     "@types/express": "^5.0.6",
@@ -22,6 +26,7 @@
     "cors": "^2.8.6",
     "dotenv": "^18.0.2",
     "express": "^5.2.1",
+    "groq-sdk": "^1.6.0",
     "pg": "^8.23.0",
     "ws": "^8.21.3",
     "zod": "^4.6.5"

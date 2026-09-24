@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
 import {
   AgentMicrophone,
   AgentPlayer,
@@ -8,12 +8,14 @@ import {
 const BACKEND_URL = "http://localhost:3001";
 
 type ConversationMessage = {
-  role: string;
+  role: "user" | "assistant";
   content: string;
 };
 
 export function Interview() {
   const { id } = useParams();
+
+  const navigate = useNavigate();
 
   const socketRef =
     useRef<WebSocket | null>(null);
@@ -161,9 +163,7 @@ export function Interview() {
           );
 
           /*
-          |--------------------------------------------------------------------------
-          | Start microphone
-          |--------------------------------------------------------------------------
+          Start microphone.
           */
 
           const mic =
@@ -174,13 +174,13 @@ export function Interview() {
                   WebSocket.OPEN
                 ) {
                   /*
-                  |--------------------------------------------------------------------------
-                  | IMPORTANT:
-                  |
-                  | Send ONLY raw microphone audio.
-                  |
-                  | No transcript is sent.
-                  |--------------------------------------------------------------------------
+                  IMPORTANT:
+
+                  Send ONLY raw microphone
+                  audio.
+
+                  No transcript is sent
+                  from the browser.
                   */
 
                   socket.send(data);
@@ -205,20 +205,17 @@ export function Interview() {
 
         /*
         |--------------------------------------------------------------------------
-        | Conversation text
+        | Complete conversational turn
         |--------------------------------------------------------------------------
         |
-        | This came from:
+        | The backend has already aggregated
+        | Deepgram ConversationText events.
         |
-        | Deepgram -> Backend -> Browser
-        |
-        | The backend has already saved it to Prisma.
-        |--------------------------------------------------------------------------
         */
 
         if (
           message.type ===
-          "conversation-text"
+          "conversation-turn"
         ) {
           setConversation(
             (previous) => [
@@ -282,7 +279,62 @@ export function Interview() {
 
         /*
         |--------------------------------------------------------------------------
-        | Error
+        | Evaluation complete
+        |--------------------------------------------------------------------------
+        */
+
+        if (
+          message.type ===
+          "evaluation-complete"
+        ) {
+          console.log(
+            "Interview evaluation complete"
+          );
+
+          setStatus(
+            "Evaluation complete"
+          );
+
+          /*
+          Give React/browser a moment to
+          process the final state before
+          navigating.
+          */
+
+          setTimeout(() => {
+            navigate(
+              `/results/${id}`
+            );
+          }, 200);
+
+          return;
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | Evaluation error
+        |--------------------------------------------------------------------------
+        */
+
+        if (
+          message.type ===
+          "evaluation-error"
+        ) {
+          console.error(
+            "Evaluation error:",
+            message.message
+          );
+
+          setStatus(
+            "Evaluation failed"
+          );
+
+          return;
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | General error
         |--------------------------------------------------------------------------
         */
 
@@ -310,9 +362,22 @@ export function Interview() {
           message.type ===
           "deepgram-disconnected"
         ) {
-          setStatus(
-            "Disconnected"
-          );
+          /*
+          Don't overwrite the evaluation
+          state if evaluation has already
+          completed.
+          */
+
+          if (
+            status !==
+            "Evaluation complete"
+          ) {
+            setStatus(
+              "Disconnected"
+            );
+          }
+
+          return;
         }
       };
 
@@ -329,8 +394,17 @@ export function Interview() {
 
         micRef.current?.stop();
 
+        /*
+        Don't replace the result transition
+        state with "Disconnected".
+        */
+
         setStatus(
-          "Disconnected"
+          (currentStatus) =>
+            currentStatus ===
+              "Evaluation complete"
+              ? currentStatus
+              : "Disconnected"
         );
       };
 
@@ -375,44 +449,53 @@ export function Interview() {
   */
 
   function stopInterview() {
-    /*
-    |--------------------------------------------------------------------------
-    | Tell backend to end the interview
-    |--------------------------------------------------------------------------
-    */
-
     if (
       socketRef.current?.readyState ===
       WebSocket.OPEN
     ) {
+      /*
+      Tell backend to end the interview.
+
+      IMPORTANT:
+
+      We do NOT immediately close the
+      WebSocket here.
+
+      The backend needs the connection
+      to send evaluation-complete.
+      */
+
       socketRef.current.send(
         JSON.stringify({
           type: "end",
         })
       );
+
+      setStatus(
+        "Evaluating..."
+      );
+
+      /*
+      Stop microphone so no additional
+      audio is sent while evaluation
+      happens.
+      */
+
+      micRef.current?.stop();
+
+      micRef.current = null;
+
+      return;
     }
 
     /*
-    |--------------------------------------------------------------------------
-    | Stop microphone
-    |--------------------------------------------------------------------------
+    If there is no active connection,
+    clean everything up.
     */
 
     micRef.current?.stop();
 
-    /*
-    |--------------------------------------------------------------------------
-    | Close browser -> backend connection
-    |--------------------------------------------------------------------------
-    */
-
     socketRef.current?.close();
-
-    /*
-    |--------------------------------------------------------------------------
-    | Dispose player
-    |--------------------------------------------------------------------------
-    */
 
     playerRef.current?.dispose();
 
@@ -471,7 +554,11 @@ export function Interview() {
             status ===
               "Listening" ||
             status ===
-              "Thinking..."
+              "Thinking..." ||
+            status ===
+              "Evaluating..." ||
+            status ===
+              "Evaluation complete"
           }
           className="rounded-md border px-4 py-2"
         >
@@ -480,6 +567,12 @@ export function Interview() {
 
         <button
           onClick={stopInterview}
+          disabled={
+            status ===
+              "Evaluating..." ||
+            status ===
+              "Evaluation complete"
+          }
           className="rounded-md border px-4 py-2"
         >
           End Interview

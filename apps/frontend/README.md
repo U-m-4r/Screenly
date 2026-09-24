@@ -1,21 +1,34 @@
-# bun-react-tailwind-shadcn-template
+# Screenly Frontend
 
-To install dependencies:
+The frontend provides the candidate profile form, browser microphone session,
+live interview transcript, and results route.
 
-```bash
+## Setup
+
+Install dependencies from the repository root:
+
+```sh
 bun install
 ```
 
-To start a development server:
+Start the development server:
 
-```bash
-bun dev
+```sh
+bun run dev
 ```
 
-To run for production:
+The frontend expects the backend at `http://localhost:3001`. Start the backend
+from `apps/backend` in a separate terminal before beginning an interview.
 
-```bash
-bun start
+The main routes are:
+
+- `/` for candidate profile submission
+- `/interview/:id` for the live Deepgram interview
+- `/results/:id` for the persisted interview result
+
+Production build and typecheck:
+
+```sh
+bun run build
+bun run check-types
 ```
-
-This project was created using `bun init` in bun v1.4.2. [Bun](https://bun.com) is a fast all-in-one JavaScript runtime.

@@ -6,6 +6,7 @@ import { createServer } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { DeepgramClient } from "@deepgram/sdk";
 
+import { evaluateInterview } from "./evaluator";
 import { PreInterviewRequestSchema } from "./types";
 import { prisma } from "./db";
 
@@ -147,6 +148,74 @@ app.post("/api/v1/pre-interview", async (req, res) => {
 
 /*
 |--------------------------------------------------------------------------
+| Results API
+|--------------------------------------------------------------------------
+|
+| The browser can retrieve a completed result.
+|
+| The browser does NOT provide the score or evaluation.
+| Everything comes from PostgreSQL.
+|
+*/
+
+app.get("/api/v1/results/:id", async (req, res) => {
+  try {
+    const interviewId = req.params.id;
+
+    const interview = await prisma.interview.findUnique({
+      where: {
+        id: interviewId,
+      },
+      select: {
+        id: true,
+        status: true,
+        score: true,
+        summary: true,
+        strengths: true,
+        improvements: true,
+        categories: true,
+        topics: true,
+        conversations: {
+          orderBy: {
+            createdAt: "asc",
+          },
+          select: {
+            id: true,
+            message: true,
+            type: true,
+          },
+        },
+      },
+    });
+
+    if (!interview) {
+      return res.status(404).json({
+        error: "Interview not found",
+      });
+    }
+
+    return res.json({
+      interviewId: interview.id,
+      status: interview.status,
+      score: interview.score,
+      summary: interview.summary,
+      strengths: interview.strengths,
+      improvements: interview.improvements,
+      categories: interview.categories,
+      topics: interview.topics,
+      conversations: interview.conversations,
+    });
+  } catch (error) {
+    console.error("Result fetch error:", error);
+
+    return res.status(500).json({
+      error: "Failed to fetch interview result",
+    });
+  }
+});
+
+/*
+|--------------------------------------------------------------------------
 | Browser -> Screenly Backend -> Deepgram
 |--------------------------------------------------------------------------
 |
@@ -156,6 +225,7 @@ app.post("/api/v1/pre-interview", async (req, res) => {
 |   2. "end" control message
 |
 | Browser does NOT send transcripts.
+| Browser does NOT send evaluation data.
 |
 |--------------------------------------------------------------------------
 */
@@ -168,6 +238,225 @@ wss.on("connection", async (browserSocket, request) => {
   let interviewId: string | null = null;
   let interviewEnded = false;
   let deepgramReady = false;
+
+  type TurnRole = "User" | "Assistant";
+
+  let currentTurnRole: TurnRole | null = null;
+  let currentTurnParts: string[] = [];
+
+  /*
+  Database writes are serialized so transcript order
+  is preserved.
+  */
+  let messageWriteQueue = Promise.resolve();
+
+  /*
+  |--------------------------------------------------------------------------
+  | Flush current conversational turn
+  |--------------------------------------------------------------------------
+  */
+
+  function flushCurrentTurn() {
+    if (
+      !currentTurnRole ||
+      currentTurnParts.length === 0
+    ) {
+      return null;
+    }
+
+    const message = currentTurnParts
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const turn = {
+      type: currentTurnRole,
+      message,
+    };
+
+    currentTurnRole = null;
+    currentTurnParts = [];
+
+    return turn;
+  }
+
+  /*
+  |--------------------------------------------------------------------------
+  | Queue transcript database write
+  |--------------------------------------------------------------------------
+  */
+
+  function queueMessageWrite(
+    turn: {
+      type: TurnRole;
+      message: string;
+    }
+  ) {
+    if (!interviewId) {
+      return;
+    }
+
+    const id = interviewId;
+
+    messageWriteQueue =
+      messageWriteQueue
+        .then(async () => {
+          await prisma.message.create({
+            data: {
+              message: turn.message,
+              type: turn.type,
+              interviewId: id,
+            },
+          });
+        })
+        .catch((error) => {
+          console.error(
+            "Failed to save transcript turn:",
+            error
+          );
+        });
+  }
+
+  /*
+  |--------------------------------------------------------------------------
+  | Send completed turn to browser
+  |--------------------------------------------------------------------------
+  */
+
+  function sendTurnToBrowser(
+    turn: {
+      type: TurnRole;
+      message: string;
+    }
+  ) {
+    if (
+      browserSocket.readyState !==
+      WebSocket.OPEN
+    ) {
+      return;
+    }
+
+    browserSocket.send(
+      JSON.stringify({
+        type: "conversation-turn",
+        role:
+          turn.type === "User"
+            ? "user"
+            : "assistant",
+        content: turn.message,
+      })
+    );
+  }
+
+  /*
+  |--------------------------------------------------------------------------
+  | Evaluate completed interview
+  |--------------------------------------------------------------------------
+  */
+
+  async function evaluateCompletedInterview() {
+    if (!interviewId) {
+      throw new Error(
+        "Cannot evaluate interview without interview ID"
+      );
+    }
+
+    console.log(
+      `Starting evaluation for interview ${interviewId}`
+    );
+
+    /*
+    Load the authoritative transcript from PostgreSQL.
+    */
+
+    const interview =
+      await prisma.interview.findUnique({
+        where: {
+          id: interviewId,
+        },
+        include: {
+          conversations: {
+            orderBy: {
+              createdAt: "asc",
+            },
+          },
+        },
+      });
+
+    if (!interview) {
+      throw new Error(
+        "Interview not found during evaluation"
+      );
+    }
+
+    /*
+    Convert Prisma messages into the evaluator format.
+    */
+
+    const transcript =
+      interview.conversations.map(
+        (message) => ({
+          type: message.type,
+          message: message.message,
+        })
+      );
+
+    if (transcript.length === 0) {
+      throw new Error(
+        "Cannot evaluate an interview with no transcript"
+      );
+    }
+
+    /*
+    Ask Gemini to evaluate the complete interview.
+    */
+
+    const evaluation =
+      await evaluateInterview({
+        githubMetadata:
+          interview.githubMetadata,
+        transcript,
+      });
+
+    console.log(
+      `Evaluation completed for interview ${interviewId}`
+    );
+
+    /*
+    Save the evaluation to PostgreSQL.
+    */
+
+    await prisma.interview.update({
+      where: {
+        id: interviewId,
+      },
+
+      data: {
+        score: evaluation.score,
+
+        categories:
+          evaluation.categories,
+
+        summary:
+          evaluation.summary,
+
+        strengths:
+          evaluation.strengths,
+
+        improvements:
+          evaluation.improvements,
+
+        topics:
+          evaluation.topics,
+      },
+    });
+
+    console.log(
+      `Evaluation saved for interview ${interviewId}`
+    );
+
+    return evaluation;
+  }
 
   try {
     /*
@@ -186,7 +475,8 @@ wss.on("connection", async (browserSocket, request) => {
       `http://${request.headers.host}`
     );
 
-    const pathParts = url.pathname.split("/");
+    const pathParts =
+      url.pathname.split("/");
 
     if (
       pathParts.length !== 4 ||
@@ -214,11 +504,12 @@ wss.on("connection", async (browserSocket, request) => {
     |--------------------------------------------------------------------------
     */
 
-    const interview = await prisma.interview.findUnique({
-      where: {
-        id: interviewId,
-      },
-    });
+    const interview =
+      await prisma.interview.findUnique({
+        where: {
+          id: interviewId,
+        },
+      });
 
     if (!interview) {
       browserSocket.close(
@@ -239,6 +530,7 @@ wss.on("connection", async (browserSocket, request) => {
       where: {
         id: interviewId,
       },
+
       data: {
         status: "InProgress",
       },
@@ -263,9 +555,7 @@ wss.on("connection", async (browserSocket, request) => {
       "message",
       async (data) => {
         /*
-        |--------------------------------------------------------------------------
-        | Ignore non-object messages
-        |--------------------------------------------------------------------------
+        Ignore non-object messages.
         */
 
         if (
@@ -287,9 +577,7 @@ wss.on("connection", async (browserSocket, request) => {
           );
 
           /*
-          |--------------------------------------------------------------------------
-          | Configure Deepgram Voice Agent
-          |--------------------------------------------------------------------------
+          Configure Deepgram Voice Agent.
           */
 
           deepgramConnection?.sendSettings({
@@ -327,9 +615,10 @@ wss.on("connection", async (browserSocket, request) => {
                   model: "gemini-3.1-flash-lite",
                 },
 
-                prompt: buildInterviewPrompt(
-                  interview.githubMetadata
-                ),
+                prompt:
+                  buildInterviewPrompt(
+                    interview.githubMetadata
+                  ),
               },
 
               speak: {
@@ -354,7 +643,10 @@ wss.on("connection", async (browserSocket, request) => {
         |--------------------------------------------------------------------------
         */
 
-        if (data.type === "SettingsApplied") {
+        if (
+          data.type ===
+          "SettingsApplied"
+        ) {
           deepgramReady = true;
 
           console.log(
@@ -362,9 +654,7 @@ wss.on("connection", async (browserSocket, request) => {
           );
 
           /*
-          |--------------------------------------------------------------------------
-          | Tell browser it can start microphone
-          |--------------------------------------------------------------------------
+          Tell browser it can start microphone.
           */
 
           if (
@@ -388,61 +678,59 @@ wss.on("connection", async (browserSocket, request) => {
         |
         | This transcript came directly from Deepgram.
         |
-        | The browser did NOT provide it.
+        | We aggregate multiple ConversationText
+        | events into complete conversational turns.
         |
-        |--------------------------------------------------------------------------
         */
 
-        if (data.type === "ConversationText") {
-          console.log(
-            `${data.role}: ${data.content}`
-          );
+        if (
+          data.type ===
+          "ConversationText"
+        ) {
+          const role: TurnRole =
+            data.role === "user"
+              ? "User"
+              : "Assistant";
 
           /*
-          |--------------------------------------------------------------------------
-          | Save authoritative transcript
-          |--------------------------------------------------------------------------
-          */
-
-          if (interviewId) {
-            await prisma.message.create({
-              data: {
-                message: data.content,
-
-                type:
-                  data.role === "user"
-                    ? "User"
-                    : "Assistant",
-
-                interviewId,
-              },
-            });
-          }
-
-          /*
-          |--------------------------------------------------------------------------
-          | Forward transcript to browser
-          |--------------------------------------------------------------------------
-          |
-          | This is ONLY for UI.
-          |
-          | The browser cannot modify the database record.
-          |
-          |--------------------------------------------------------------------------
+          If the speaker changes, the previous
+          speaker's turn is complete.
           */
 
           if (
-            browserSocket.readyState ===
-            WebSocket.OPEN
+            currentTurnRole &&
+            currentTurnRole !== role
           ) {
-            browserSocket.send(
-              JSON.stringify({
-                type: "conversation-text",
-                role: data.role,
-                content: data.content,
-              })
-            );
+            const completedTurn =
+              flushCurrentTurn();
+
+            if (completedTurn) {
+              queueMessageWrite(
+                completedTurn
+              );
+
+              sendTurnToBrowser(
+                completedTurn
+              );
+            }
           }
+
+          /*
+          Start a new turn if necessary.
+          */
+
+          if (!currentTurnRole) {
+            currentTurnRole = role;
+          }
+
+          /*
+          Add this ConversationText chunk
+          to the current turn.
+          */
+
+          currentTurnParts.push(
+            data.content
+          );
 
           return;
         }
@@ -451,6 +739,12 @@ wss.on("connection", async (browserSocket, request) => {
         |--------------------------------------------------------------------------
         | History
         |--------------------------------------------------------------------------
+        |
+        | We do not use History for persistence.
+        |
+        | ConversationText is our authoritative
+        | transcript stream.
+        |
         */
 
         if (data.type === "History") {
@@ -468,7 +762,8 @@ wss.on("connection", async (browserSocket, request) => {
         */
 
         if (
-          data.type === "UserStartedSpeaking"
+          data.type ===
+          "UserStartedSpeaking"
         ) {
           if (
             browserSocket.readyState ===
@@ -476,7 +771,8 @@ wss.on("connection", async (browserSocket, request) => {
           ) {
             browserSocket.send(
               JSON.stringify({
-                type: "user-started-speaking",
+                type:
+                  "user-started-speaking",
               })
             );
           }
@@ -490,14 +786,18 @@ wss.on("connection", async (browserSocket, request) => {
         |--------------------------------------------------------------------------
         */
 
-        if (data.type === "AgentThinking") {
+        if (
+          data.type ===
+          "AgentThinking"
+        ) {
           if (
             browserSocket.readyState ===
             WebSocket.OPEN
           ) {
             browserSocket.send(
               JSON.stringify({
-                type: "agent-thinking",
+                type:
+                  "agent-thinking",
               })
             );
           }
@@ -509,18 +809,50 @@ wss.on("connection", async (browserSocket, request) => {
         |--------------------------------------------------------------------------
         | Agent audio finished
         |--------------------------------------------------------------------------
+        |
+        | This is the natural boundary for an
+        | assistant conversational turn.
+        |
         */
 
         if (
-          data.type === "AgentAudioDone"
+          data.type ===
+          "AgentAudioDone"
         ) {
+          /*
+          Only flush here if the current turn
+          belongs to the assistant.
+
+          A user's turn is flushed when the
+          assistant starts speaking.
+          */
+
+          if (
+            currentTurnRole ===
+            "Assistant"
+          ) {
+            const completedTurn =
+              flushCurrentTurn();
+
+            if (completedTurn) {
+              queueMessageWrite(
+                completedTurn
+              );
+
+              sendTurnToBrowser(
+                completedTurn
+              );
+            }
+          }
+
           if (
             browserSocket.readyState ===
             WebSocket.OPEN
           ) {
             browserSocket.send(
               JSON.stringify({
-                type: "agent-audio-done",
+                type:
+                  "agent-audio-done",
               })
             );
           }
@@ -563,7 +895,9 @@ wss.on("connection", async (browserSocket, request) => {
         |--------------------------------------------------------------------------
         */
 
-        if (data.type === "Warning") {
+        if (
+          data.type === "Warning"
+        ) {
           console.warn(
             "Deepgram warning:",
             data
@@ -590,7 +924,9 @@ wss.on("connection", async (browserSocket, request) => {
             browserSocket.readyState ===
             WebSocket.OPEN
           ) {
-            browserSocket.send(audioBuffer);
+            browserSocket.send(
+              audioBuffer
+            );
           }
 
           return;
@@ -721,9 +1057,36 @@ wss.on("connection", async (browserSocket, request) => {
               );
 
               /*
-              |--------------------------------------------------------------------------
-              | Mark interview done
-              |--------------------------------------------------------------------------
+              Flush any remaining turn.
+
+              This is particularly important if
+              the candidate's final message was a
+              user turn.
+              */
+
+              const finalTurn =
+                flushCurrentTurn();
+
+              if (finalTurn) {
+                queueMessageWrite(
+                  finalTurn
+                );
+
+                sendTurnToBrowser(
+                  finalTurn
+                );
+              }
+
+              /*
+              Wait until every queued transcript
+              write has reached PostgreSQL.
+              */
+
+              await messageWriteQueue;
+
+              /*
+              Mark interview as done BEFORE
+              evaluation.
               */
 
               if (interviewId) {
@@ -741,17 +1104,34 @@ wss.on("connection", async (browserSocket, request) => {
               }
 
               /*
-              |--------------------------------------------------------------------------
-              | Close Deepgram
-              |--------------------------------------------------------------------------
+              Evaluate using the transcript
+              stored in PostgreSQL.
+              */
+
+              try {
+                await evaluateCompletedInterview();
+              } catch (evaluationError) {
+                console.error(
+                  `Evaluation failed for interview ${interviewId}:`,
+                  evaluationError
+                );
+
+                /*
+                The interview remains Done.
+                The transcript is preserved.
+                The score stays at its default
+                value until evaluation succeeds.
+                */
+              }
+
+              /*
+              Close Deepgram.
               */
 
               deepgramConnection?.close();
 
               /*
-              |--------------------------------------------------------------------------
-              | Close browser connection
-              |--------------------------------------------------------------------------
+              Close browser connection.
               */
 
               browserSocket.close();
