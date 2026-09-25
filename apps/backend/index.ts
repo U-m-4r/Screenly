@@ -1109,34 +1109,65 @@ wss.on("connection", async (browserSocket, request) => {
               */
 
               try {
-                await evaluateCompletedInterview();
-              } catch (evaluationError) {
-                console.error(
-                  `Evaluation failed for interview ${interviewId}:`,
-                  evaluationError
-                );
+  await evaluateCompletedInterview();
 
-                /*
-                The interview remains Done.
-                The transcript is preserved.
-                The score stays at its default
-                value until evaluation succeeds.
-                */
-              }
+  console.log(
+    `Sending evaluation-complete to browser for interview ${interviewId}`
+  );
 
-              /*
-              Close Deepgram.
-              */
+  if (browserSocket.readyState === WebSocket.OPEN) {
+    browserSocket.send(
+      JSON.stringify({
+        type: "evaluation-complete",
+      })
+    );
+  }
+} catch (evaluationError) {
+  console.error(
+    `Evaluation failed for interview ${interviewId}:`,
+    evaluationError
+  );
 
-              deepgramConnection?.close();
+  if (browserSocket.readyState === WebSocket.OPEN) {
+    browserSocket.send(
+      JSON.stringify({
+        type: "evaluation-error",
+        message:
+          "Interview ended, but evaluation could not be completed.",
+      })
+    );
+  }
+}
 
-              /*
-              Close browser connection.
-              */
+/*
+|--------------------------------------------------------------------------
+| Give the browser time to receive the completion event.
+|--------------------------------------------------------------------------
+*/
 
-              browserSocket.close();
+await new Promise((resolve) =>
+  setTimeout(resolve, 500)
+);
 
-              return;
+/*
+|--------------------------------------------------------------------------
+| Close Deepgram.
+|--------------------------------------------------------------------------
+*/
+
+deepgramConnection?.close();
+
+/*
+|--------------------------------------------------------------------------
+| Close browser connection.
+|--------------------------------------------------------------------------
+*/
+
+if (browserSocket.readyState === WebSocket.OPEN) {
+  browserSocket.close();
+}
+
+return;
             }
           } catch (error) {
             console.warn(

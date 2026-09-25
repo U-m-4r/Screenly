@@ -83,7 +83,7 @@ The root `.gitignore` excludes local `.env` files, so never commit credentials.
 | `DATABASE_URL`     | PostgreSQL connection string used by Prisma            |
 | `DEEPGRAM_API_KEY` | Deepgram API key used to create temporary audio tokens |
 | `GITHUB_TOKEN`     | GitHub token used to fetch a user's repositories       |
-| `GROQ_API_KEY`     | Groq API key used to evaluate completed interviews    |
+| `GROQ_API_KEY`     | Groq API key used to evaluate completed interviews     |
 
 ## API Endpoints
 

@@ -1,9 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import {
-  AgentMicrophone,
-  AgentPlayer,
-} from "@deepgram/agents";
+import { AgentMicrophone, AgentPlayer } from "@deepgram/agents";
 
 const BACKEND_URL = "http://localhost:3001";
 
@@ -14,45 +11,24 @@ type ConversationMessage = {
 
 export function Interview() {
   const { id } = useParams();
-
   const navigate = useNavigate();
 
-  const socketRef =
-    useRef<WebSocket | null>(null);
+  const socketRef = useRef<WebSocket | null>(null);
+  const micRef = useRef<AgentMicrophone | null>(null);
+  const playerRef = useRef<AgentPlayer | null>(null);
 
-  const micRef =
-    useRef<AgentMicrophone | null>(null);
-
-  const playerRef =
-    useRef<AgentPlayer | null>(null);
-
-  const [status, setStatus] =
-    useState("Ready");
-
-  const [conversation, setConversation] =
-    useState<ConversationMessage[]>([]);
-
-  /*
-  |--------------------------------------------------------------------------
-  | Start interview
-  |--------------------------------------------------------------------------
-  */
+  const [status, setStatus] = useState("Ready");
+  const [conversation, setConversation] = useState<
+    ConversationMessage[]
+  >([]);
 
   async function startInterview() {
     try {
       if (!id) {
-        throw new Error(
-          "Missing interview ID"
-        );
+        throw new Error("Missing interview ID");
       }
 
       setStatus("Connecting...");
-
-      /*
-      |--------------------------------------------------------------------------
-      | Create audio player
-      |--------------------------------------------------------------------------
-      */
 
       const player = new AgentPlayer({
         sampleRate: 24000,
@@ -60,139 +36,52 @@ export function Interview() {
 
       playerRef.current = player;
 
-      /*
-      |--------------------------------------------------------------------------
-      | Browser -> Screenly Backend
-      |--------------------------------------------------------------------------
-      */
-
       const wsUrl =
         BACKEND_URL
           .replace("http://", "ws://")
           .replace("https://", "wss://") +
         `/ws/interview/${id}`;
 
-      console.log(
-        "Connecting to:",
-        wsUrl
-      );
+      console.log("Connecting to:", wsUrl);
 
-      const socket =
-        new WebSocket(wsUrl);
+      const socket = new WebSocket(wsUrl);
 
-      /*
-      |--------------------------------------------------------------------------
-      | Receive binary audio as ArrayBuffer
-      |--------------------------------------------------------------------------
-      */
-
-      socket.binaryType =
-        "arraybuffer";
-
+      socket.binaryType = "arraybuffer";
       socketRef.current = socket;
 
-      /*
-      |--------------------------------------------------------------------------
-      | Backend connection opened
-      |--------------------------------------------------------------------------
-      */
-
       socket.onopen = () => {
-        console.log(
-          "Connected to Screenly backend"
-        );
-
-        setStatus(
-          "Connected to backend"
-        );
+        console.log("Connected to Screenly backend");
+        setStatus("Connected to backend");
       };
 
-      /*
-      |--------------------------------------------------------------------------
-      | Messages from backend
-      |--------------------------------------------------------------------------
-      */
-
-      socket.onmessage = async (
-        event
-      ) => {
-        /*
-        |--------------------------------------------------------------------------
-        | Binary message = Deepgram audio
-        |--------------------------------------------------------------------------
-        */
-
-        if (
-          event.data instanceof
-          ArrayBuffer
-        ) {
-          player.queue(
-            event.data
-          );
-
+      socket.onmessage = async (event) => {
+        // Deepgram audio coming from the backend
+        if (event.data instanceof ArrayBuffer) {
+          player.queue(event.data);
           return;
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | JSON message
-        |--------------------------------------------------------------------------
-        */
+        const message = JSON.parse(event.data);
 
-        const message =
-          JSON.parse(
-            event.data
-          );
+        console.log("Backend event:", message);
 
-        console.log(
-          "Backend event:",
-          message
-        );
+        // Backend finished connecting to Deepgram
+        if (message.type === "ready") {
+          console.log("Deepgram is ready");
 
-        /*
-        |--------------------------------------------------------------------------
-        | Deepgram ready
-        |--------------------------------------------------------------------------
-        */
-
-        if (
-          message.type === "ready"
-        ) {
-          console.log(
-            "Deepgram is ready"
-          );
-
-          /*
-          Start microphone.
-          */
-
-          const mic =
-            new AgentMicrophone(
-              (data) => {
-                if (
-                  socket.readyState ===
-                  WebSocket.OPEN
-                ) {
-                  /*
-                  IMPORTANT:
-
-                  Send ONLY raw microphone
-                  audio.
-
-                  No transcript is sent
-                  from the browser.
-                  */
-
-                  socket.send(data);
-                }
-              },
-              {
-                sampleRate: 16000,
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true,
+          const mic = new AgentMicrophone(
+            (data) => {
+              if (socket.readyState === WebSocket.OPEN) {
+                socket.send(data);
               }
-            );
+            },
+            {
+              sampleRate: 16000,
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            }
+          );
 
           micRef.current = mic;
 
@@ -203,145 +92,69 @@ export function Interview() {
           return;
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | Complete conversational turn
-        |--------------------------------------------------------------------------
-        |
-        | The backend has already aggregated
-        | Deepgram ConversationText events.
-        |
-        */
-
-        if (
-          message.type ===
-          "conversation-turn"
-        ) {
-          setConversation(
-            (previous) => [
-              ...previous,
-              {
-                role:
-                  message.role,
-                content:
-                  message.content,
-              },
-            ]
-          );
+        // Authoritative transcript turn from backend
+        if (message.type === "conversation-turn") {
+          setConversation((previous) => [
+            ...previous,
+            {
+              role: message.role,
+              content: message.content,
+            },
+          ]);
 
           return;
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | Candidate started speaking
-        |--------------------------------------------------------------------------
-        */
-
-        if (
-          message.type ===
-          "user-started-speaking"
-        ) {
+        // Candidate started speaking
+        if (message.type === "user-started-speaking") {
           player.interrupt();
-
           return;
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | AI thinking
-        |--------------------------------------------------------------------------
-        */
-
-        if (
-          message.type ===
-          "agent-thinking"
-        ) {
+        // AI is thinking
+        if (message.type === "agent-thinking") {
           setStatus("Thinking...");
-
           return;
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | AI finished speaking
-        |--------------------------------------------------------------------------
-        */
-
-        if (
-          message.type ===
-          "agent-audio-done"
-        ) {
+        // AI finished speaking
+        if (message.type === "agent-audio-done") {
           setStatus("Listening");
-
           return;
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | Evaluation complete
-        |--------------------------------------------------------------------------
-        */
+        // Backend finished saving + evaluating the interview
+        if (message.type === "evaluation-complete") {
+          console.log("Interview evaluation complete");
 
-        if (
-          message.type ===
-          "evaluation-complete"
-        ) {
-          console.log(
-            "Interview evaluation complete"
-          );
+          setStatus("Evaluation complete");
 
-          setStatus(
-            "Evaluation complete"
-          );
-
-          /*
-          Give React/browser a moment to
-          process the final state before
-          navigating.
-          */
-
-          setTimeout(() => {
-            navigate(
+          if (id) {
+            console.log(
+              "Redirecting to results:",
               `/results/${id}`
             );
-          }, 200);
+
+            navigate(`/results/${id}`);
+          }
 
           return;
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | Evaluation error
-        |--------------------------------------------------------------------------
-        */
-
-        if (
-          message.type ===
-          "evaluation-error"
-        ) {
+        // Evaluation failed
+        if (message.type === "evaluation-error") {
           console.error(
             "Evaluation error:",
             message.message
           );
 
-          setStatus(
-            "Evaluation failed"
-          );
+          setStatus("Evaluation failed");
 
           return;
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | General error
-        |--------------------------------------------------------------------------
-        */
-
-        if (
-          message.type ===
-          "error"
-        ) {
+        // General backend error
+        if (message.type === "error") {
           console.error(
             "Interview error:",
             message.message
@@ -352,40 +165,22 @@ export function Interview() {
           return;
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | Deepgram disconnected
-        |--------------------------------------------------------------------------
-        */
+        // Deepgram disconnected
+        if (message.type === "deepgram-disconnected") {
+          setStatus((currentStatus) => {
+            if (
+              currentStatus === "Evaluation complete" ||
+              currentStatus === "Evaluating..."
+            ) {
+              return currentStatus;
+            }
 
-        if (
-          message.type ===
-          "deepgram-disconnected"
-        ) {
-          /*
-          Don't overwrite the evaluation
-          state if evaluation has already
-          completed.
-          */
-
-          if (
-            status !==
-            "Evaluation complete"
-          ) {
-            setStatus(
-              "Disconnected"
-            );
-          }
+            return "Disconnected";
+          });
 
           return;
         }
       };
-
-      /*
-      |--------------------------------------------------------------------------
-      | Backend connection closed
-      |--------------------------------------------------------------------------
-      */
 
       socket.onclose = () => {
         console.log(
@@ -394,25 +189,17 @@ export function Interview() {
 
         micRef.current?.stop();
 
-        /*
-        Don't replace the result transition
-        state with "Disconnected".
-        */
+        setStatus((currentStatus) => {
+          if (
+            currentStatus === "Evaluation complete" ||
+            currentStatus === "Evaluating..."
+          ) {
+            return currentStatus;
+          }
 
-        setStatus(
-          (currentStatus) =>
-            currentStatus ===
-              "Evaluation complete"
-              ? currentStatus
-              : "Disconnected"
-        );
+          return "Disconnected";
+        });
       };
-
-      /*
-      |--------------------------------------------------------------------------
-      | WebSocket error
-      |--------------------------------------------------------------------------
-      */
 
       socket.onerror = (error) => {
         console.error(
@@ -436,34 +223,16 @@ export function Interview() {
       socketRef.current = null;
       playerRef.current = null;
 
-      setStatus(
-        "Failed to connect"
-      );
+      setStatus("Failed to connect");
     }
   }
-
-  /*
-  |--------------------------------------------------------------------------
-  | Stop interview
-  |--------------------------------------------------------------------------
-  */
 
   function stopInterview() {
     if (
       socketRef.current?.readyState ===
       WebSocket.OPEN
     ) {
-      /*
-      Tell backend to end the interview.
-
-      IMPORTANT:
-
-      We do NOT immediately close the
-      WebSocket here.
-
-      The backend needs the connection
-      to send evaluation-complete.
-      */
+      console.log("Ending interview...");
 
       socketRef.current.send(
         JSON.stringify({
@@ -471,32 +240,16 @@ export function Interview() {
         })
       );
 
-      setStatus(
-        "Evaluating..."
-      );
-
-      /*
-      Stop microphone so no additional
-      audio is sent while evaluation
-      happens.
-      */
+      setStatus("Evaluating...");
 
       micRef.current?.stop();
-
       micRef.current = null;
 
       return;
     }
 
-    /*
-    If there is no active connection,
-    clean everything up.
-    */
-
     micRef.current?.stop();
-
     socketRef.current?.close();
-
     playerRef.current?.dispose();
 
     micRef.current = null;
@@ -506,27 +259,13 @@ export function Interview() {
     setStatus("Stopped");
   }
 
-  /*
-  |--------------------------------------------------------------------------
-  | Cleanup when leaving page
-  |--------------------------------------------------------------------------
-  */
-
   useEffect(() => {
     return () => {
       micRef.current?.stop();
-
       socketRef.current?.close();
-
       playerRef.current?.dispose();
     };
   }, []);
-
-  /*
-  |--------------------------------------------------------------------------
-  | UI
-  |--------------------------------------------------------------------------
-  */
 
   return (
     <div className="min-h-screen w-screen flex flex-col items-center p-8">
@@ -547,18 +286,12 @@ export function Interview() {
         <button
           onClick={startInterview}
           disabled={
-            status ===
-              "Connecting..." ||
-            status ===
-              "Connected to backend" ||
-            status ===
-              "Listening" ||
-            status ===
-              "Thinking..." ||
-            status ===
-              "Evaluating..." ||
-            status ===
-              "Evaluation complete"
+            status === "Connecting..." ||
+            status === "Connected to backend" ||
+            status === "Listening" ||
+            status === "Thinking..." ||
+            status === "Evaluating..." ||
+            status === "Evaluation complete"
           }
           className="rounded-md border px-4 py-2"
         >
@@ -568,10 +301,8 @@ export function Interview() {
         <button
           onClick={stopInterview}
           disabled={
-            status ===
-              "Evaluating..." ||
-            status ===
-              "Evaluation complete"
+            status === "Evaluating..." ||
+            status === "Evaluation complete"
           }
           className="rounded-md border px-4 py-2"
         >
@@ -603,3 +334,5 @@ export function Interview() {
     </div>
   );
 }
+
+export default Interview;

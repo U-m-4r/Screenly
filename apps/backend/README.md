@@ -36,12 +36,12 @@ The server listens on `http://localhost:3001`.
 ## API
 
 - `POST /api/v1/pre-interview` loads the candidate's GitHub repositories and
-	creates an interview. The request body contains `github` and `linkedin` URLs.
+  creates an interview. The request body contains `github` and `linkedin` URLs.
 - `GET /api/v1/results/:id` returns the persisted interview status, evaluation,
-	and transcript.
+  and transcript.
 - `GET /api/deepgram-token` creates a temporary Deepgram token.
 - `WS /ws/interview/:id` streams microphone audio to Deepgram and sends
-	completed conversation turns back to the browser.
+  completed conversation turns back to the browser.
 
 When the client sends the `end` control message, the backend waits for queued
 transcript writes, evaluates the authoritative PostgreSQL transcript with

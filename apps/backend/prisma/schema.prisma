@@ -8,24 +8,24 @@ datasource db {
 }
 
 model Interview {
-  id              String          @id @default(uuid())
-  githubMetadata  Json
-  status          InterviewStatus
-  score           Int             @default(0)
-  summary         String?
-  strengths       Json?
-  improvements    Json?
-  categories      Json?
-  topics          Json?
-  conversations   Message[]
+  id             String          @id @default(uuid())
+  githubMetadata Json
+  status         InterviewStatus
+  score          Int             @default(0)
+  categories     Json?
+  improvements   Json?
+  strengths      Json?
+  summary        String?
+  topics         Json?
+  conversations  Message[]
 }
 
 model Message {
   id          String      @id @default(uuid())
   message     String
   type        MessageType
-  createdAt   DateTime    @default(now())
   interviewId String
+  createdAt   DateTime    @default(now())
   interview   Interview   @relation(fields: [interviewId], references: [id])
 }
 
