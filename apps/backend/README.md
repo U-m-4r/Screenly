@@ -11,8 +11,8 @@ Install dependencies from the repository root:
 bun install
 ```
 
-Create `apps/backend/.env` from the example and provide PostgreSQL, GitHub,
-Deepgram, and Groq credentials:
+Create `apps/backend/.env` from the example and provide PostgreSQL, Google,
+GitHub, Deepgram, and Groq credentials:
 
 ```sh
 cp .env.example .env
@@ -33,10 +33,16 @@ bun run index.ts
 
 The server listens on `http://localhost:3001`.
 
+`GOOGLE_CLIENT_ID` must be the OAuth 2.0 Web client ID configured for the
+frontend origin. Google sign-in creates an HTTP-only session cookie valid for
+seven days.
+
 ## API
 
 - `POST /api/v1/pre-interview` loads the candidate's GitHub repositories and
   creates an interview. The request body contains `github` and `linkedin` URLs.
+- `POST /api/v1/auth/google` verifies a Google Identity Services credential and
+  creates a session cookie.
 - `GET /api/v1/results/:id` returns the persisted interview status, evaluation,
   and transcript.
 - `GET /api/deepgram-token` creates a temporary Deepgram token.

@@ -2,8 +2,10 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import axios from "axios";
+import crypto from "crypto";
 import { createServer } from "http";
 import { WebSocketServer, WebSocket } from "ws";
+import { OAuth2Client } from "google-auth-library";
 import { DeepgramClient } from "@deepgram/sdk";
 
 import { evaluateInterview } from "./evaluator";
@@ -12,7 +14,17 @@ import { prisma } from "./db";
 
 const app = express();
 
-app.use(cors());
+const googleClient = new OAuth2Client(
+  process.env.GOOGLE_CLIENT_ID
+);
+
+app.use(
+  cors({
+    origin: "http://localhost:3000",
+    credentials: true,
+  })
+);
+
 app.use(express.json());
 
 const server = createServer(app);
@@ -84,6 +96,165 @@ Ask questions that test whether the candidate actually understands the technolog
 This is a technical interview, not a casual conversation.
 `;
 }
+
+/*
+|--------------------------------------------------------------------------
+| Google Authentication
+|--------------------------------------------------------------------------
+*/
+
+app.post("/api/v1/auth/google", async (req, res) => {
+  try {
+    const { credential } = req.body;
+
+    if (!credential || typeof credential !== "string") {
+      return res.status(400).json({
+        error: "Google credential is required",
+      });
+    }
+
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+
+    const payload = ticket.getPayload();
+
+    if (!payload) {
+      return res.status(401).json({
+        error: "Invalid Google token",
+      });
+    }
+
+    const googleSub = payload.sub;
+    const email = payload.email;
+    const emailVerified = payload.email_verified;
+
+    if (!googleSub || !email) {
+      return res.status(401).json({
+        error: "Google account information is incomplete",
+      });
+    }
+
+    if (!emailVerified) {
+      return res.status(401).json({
+        error: "Google email is not verified",
+      });
+    }
+
+    /*
+     * Find the user by Google's stable account ID.
+     */
+    let user = await prisma.user.findUnique({
+      where: {
+        googleSub,
+      },
+    });
+
+    /*
+     * If this Google account has not been seen before,
+     * check whether the email already belongs to a Screenly user.
+     */
+    if (!user) {
+      const existingUser = await prisma.user.findUnique({
+        where: {
+          email,
+        },
+      });
+
+      if (existingUser) {
+        user = await prisma.user.update({
+          where: {
+            id: existingUser.id,
+          },
+          data: {
+            googleSub,
+            name: payload.name ?? existingUser.name,
+            picture: payload.picture ?? existingUser.picture,
+          },
+        });
+      } else {
+        user = await prisma.user.create({
+          data: {
+            googleSub,
+            email,
+            name: payload.name ?? null,
+            picture: payload.picture ?? null,
+          },
+        });
+      }
+    } else {
+      /*
+       * Keep basic profile information up to date.
+       */
+      user = await prisma.user.update({
+        where: {
+          id: user.id,
+        },
+        data: {
+          email,
+          name: payload.name ?? user.name,
+          picture: payload.picture ?? user.picture,
+        },
+      });
+    }
+
+    /*
+     * Generate a random session token.
+     *
+     * The raw token goes into the browser cookie.
+     * Only its SHA-256 hash is stored in the database.
+     */
+    const sessionToken = crypto.randomBytes(32).toString("hex");
+
+    const tokenHash = crypto
+      .createHash("sha256")
+      .update(sessionToken)
+      .digest("hex");
+
+    const expiresAt = new Date(
+      Date.now() + 7 * 24 * 60 * 60 * 1000
+    );
+
+    await prisma.session.create({
+      data: {
+        tokenHash,
+        userId: user.id,
+        expiresAt,
+      },
+    });
+
+    /*
+     * HTTP-only cookie:
+     * JavaScript cannot read this cookie.
+     */
+    res.setHeader(
+      "Set-Cookie",
+      [
+        `screenly_session=${sessionToken}`,
+        "HttpOnly",
+        "Path=/",
+        "SameSite=Lax",
+        `Max-Age=${7 * 24 * 60 * 60}`,
+      ].join("; ")
+    );
+
+    return res.json({
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        picture: user.picture,
+      },
+    });
+  } catch (error) {
+    console.error("Google authentication error:", error);
+
+    return res.status(401).json({
+      error: "Google authentication failed",
+    });
+  }
+});
 
 /*
 |--------------------------------------------------------------------------

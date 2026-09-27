@@ -30,6 +30,7 @@ packages/
 - [Bun](https://bun.sh/) 1.4.2 or newer
 - Node.js 24 or newer
 - A PostgreSQL database
+- A Google OAuth 2.0 Web client ID
 - GitHub token with permission to read public repository data
 - Deepgram API key
 - Groq API key for post-interview evaluation
@@ -48,6 +49,16 @@ Create the backend environment file and fill in the values:
 cd apps/backend
 cp .env.example .env
 ```
+
+Create the frontend environment file and fill in the Google OAuth client ID:
+
+```sh
+cd ../frontend
+cp .env.example .env
+```
+
+In Google Cloud Console, add the frontend origin, usually
+`http://localhost:3000`, to the OAuth client's authorized JavaScript origins.
 
 Generate the Prisma client and apply migrations:
 
@@ -75,12 +86,14 @@ prints its local URL when it starts.
 
 ## Environment Variables
 
-The backend example file is [apps/backend/.env.example](apps/backend/.env.example).
+The backend example file is [apps/backend/.env.example](apps/backend/.env.example),
+and the frontend example file is [apps/frontend/.env.example](apps/frontend/.env.example).
 The root `.gitignore` excludes local `.env` files, so never commit credentials.
 
 | Variable           | Description                                            |
 | ------------------ | ------------------------------------------------------ |
 | `DATABASE_URL`     | PostgreSQL connection string used by Prisma            |
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID used to verify sign-in tokens   |
 | `DEEPGRAM_API_KEY` | Deepgram API key used to create temporary audio tokens |
 | `GITHUB_TOKEN`     | GitHub token used to fetch a user's repositories       |
 | `GROQ_API_KEY`     | Groq API key used to evaluate completed interviews     |
@@ -93,7 +106,8 @@ Creates a temporary Deepgram access token for the frontend audio session.
 
 ### `POST /api/v1/pre-interview`
 
-Creates an interview from a candidate's profile URLs.
+Creates an interview from a signed-in candidate's profile URLs. The browser
+must first authenticate through Google at `POST /api/v1/auth/google`.
 
 Example request:
 
@@ -139,6 +153,6 @@ bun run format      # Format TypeScript and Markdown files
 
 ## Status
 
-Screenly is under active development. The interview pipeline, transcript
-persistence, and post-interview evaluation are implemented; the results view
-is still being expanded.
+Screenly is under active development. Google sign-in, the interview pipeline,
+transcript persistence, post-interview evaluation, and the results view are
+implemented. Interview ownership and protected routes are still being expanded.

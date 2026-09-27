@@ -6,6 +6,14 @@ const server = serve({
     // Serve index.html for all unmatched routes.
     "/*": index,
 
+    "/api/config": {
+      async GET() {
+        return Response.json({
+          googleClientId: process.env.VITE_GOOGLE_CLIENT_ID,
+        });
+      },
+    },
+
     "/api/hello": {
       async GET(req) {
         return Response.json({
@@ -13,6 +21,7 @@ const server = serve({
           method: "GET",
         });
       },
+
       async PUT(req) {
         return Response.json({
           message: "Hello, world!",
@@ -21,21 +30,20 @@ const server = serve({
       },
     },
 
-    "/api/hello/:name": async req => {
+    "/api/hello/:name": async (req) => {
       const name = req.params.name;
+
       return Response.json({
         message: `Hello, ${name}!`,
       });
     },
   },
 
-  development: process.env.NODE_ENV !== "production" && {
-    // Enable browser hot reloading in development
-    hmr: true,
-
-    // Echo console logs from the browser to the server
-    console: true,
-  },
+  development:
+    process.env.NODE_ENV !== "production" && {
+      hmr: true,
+      console: true,
+    },
 });
 
 console.log(`🚀 Server running at ${server.url}`);
