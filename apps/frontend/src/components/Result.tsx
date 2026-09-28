@@ -56,8 +56,11 @@ export function Result() {
         }
 
         const response = await fetch(
-          `${BACKEND_URL}/api/v1/results/${id}`
-        );
+  `${BACKEND_URL}/api/v1/results/${id}`,
+  {
+    credentials: "include",
+  }
+);
 
         if (!response.ok) {
           throw new Error(

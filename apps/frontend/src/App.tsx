@@ -12,6 +12,10 @@ import { BrowserRouter, Route, Routes } from "react-router";
 
 import { GoogleOAuthProvider } from "@react-oauth/google";
 
+import { AuthProvider } from "./components/AuthProvider";
+import { ProtectedRoute } from "./components/ProtectedRoute";
+import { Dashboard } from "./components/Dashboard";
+
 export function App() {
   const [googleClientId, setGoogleClientId] = useState<string | null>(
     null
@@ -81,28 +85,54 @@ export function App() {
   }
 
   return (
-    <GoogleOAuthProvider clientId={googleClientId}>
+  <GoogleOAuthProvider clientId={googleClientId}>
+    <AuthProvider>
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<SignIn />} />
 
-          <Route path="/setup" element={<Form />} />
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
+                <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/setup"
+            element={
+              <ProtectedRoute>
+                <Form />
+              </ProtectedRoute>
+            }
+          />
 
           <Route
             path="/interview/:id"
-            element={<Interview />}
+            element={
+              <ProtectedRoute>
+                <Interview />
+              </ProtectedRoute>
+            }
           />
 
           <Route
             path="/results/:id"
-            element={<Result />}
+            element={
+              <ProtectedRoute>
+                <Result />
+              </ProtectedRoute>
+            }
           />
         </Routes>
 
         <Toaster position="top-right" />
       </BrowserRouter>
-    </GoogleOAuthProvider>
-  );
+    </AuthProvider>
+  </GoogleOAuthProvider>
+);
 }
 
 export default App;

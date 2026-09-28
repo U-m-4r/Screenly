@@ -27,6 +27,84 @@ app.use(
 
 app.use(express.json());
 
+const SESSION_COOKIE_NAME = "screenly_session";
+
+function getSessionToken(
+  cookieHeader: string | undefined
+): string | null {
+  if (!cookieHeader) return null;
+
+  const cookie = cookieHeader
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) =>
+      part.startsWith(`${SESSION_COOKIE_NAME}=`)
+    );
+
+  if (!cookie) return null;
+
+  return cookie.substring(
+    SESSION_COOKIE_NAME.length + 1
+  );
+}
+
+async function getAuthenticatedUser(
+  cookieHeader: string | undefined
+) {
+  const token = getSessionToken(cookieHeader);
+
+  if (!token) return null;
+
+  const tokenHash = crypto
+    .createHash("sha256")
+    .update(token)
+    .digest("hex");
+
+  const session = await prisma.session.findUnique({
+    where: { tokenHash },
+    include: { user: true },
+  });
+
+  if (!session) return null;
+
+  if (session.expiresAt <= new Date()) {
+    await prisma.session.delete({
+      where: { id: session.id },
+    });
+
+    return null;
+  }
+
+  return session.user;
+}
+
+async function requireAuth(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) {
+  try {
+    const user = await getAuthenticatedUser(
+      req.headers.cookie
+    );
+
+    if (!user) {
+      res.status(401).json({
+        error: "Please sign in to continue",
+      });
+      return;
+    }
+
+    next();
+  } catch (error) {
+    console.error("Authentication error:", error);
+
+    res.status(500).json({
+      error: "Authentication failed",
+    });
+  }
+}
+
 const server = createServer(app);
 
 const wss = new WebSocketServer({
@@ -256,13 +334,74 @@ app.post("/api/v1/auth/google", async (req, res) => {
   }
 });
 
+app.get("/api/v1/auth/me", async (req, res) => {
+  try {
+    const user = await getAuthenticatedUser(
+      req.headers.cookie
+    );
+
+    if (!user) {
+      return res.status(401).json({
+        error: "Not authenticated",
+      });
+    }
+
+    return res.json({
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        picture: user.picture,
+      },
+    });
+  } catch (error) {
+    console.error("Session validation error:", error);
+
+    return res.status(500).json({
+      error: "Unable to validate session",
+    });
+  }
+});
+
+app.post("/api/v1/auth/logout", async (req, res) => {
+  try {
+    const token = getSessionToken(req.headers.cookie);
+
+    if (token) {
+      const tokenHash = crypto
+        .createHash("sha256")
+        .update(token)
+        .digest("hex");
+
+      await prisma.session.deleteMany({
+        where: { tokenHash },
+      });
+    }
+
+    res.setHeader(
+      "Set-Cookie",
+      "screenly_session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0"
+    );
+
+    return res.json({
+      message: "Signed out successfully",
+    });
+  } catch (error) {
+    console.error("Logout error:", error);
+
+    return res.status(500).json({
+      error: "Unable to sign out",
+    });
+  }
+});
+
 /*
 |--------------------------------------------------------------------------
 | Pre-interview
 |--------------------------------------------------------------------------
 */
 
-app.post("/api/v1/pre-interview", async (req, res) => {
+app.post("/api/v1/pre-interview", requireAuth, async (req, res) => {
   try {
     const { success, data } =
       PreInterviewRequestSchema.safeParse(req.body);
@@ -328,10 +467,15 @@ app.post("/api/v1/pre-interview", async (req, res) => {
 | Everything comes from PostgreSQL.
 |
 */
-
-app.get("/api/v1/results/:id", async (req, res) => {
+app.get("/api/v1/results/:id", requireAuth, async (req, res) => {
   try {
     const interviewId = req.params.id;
+
+    if (typeof interviewId !== "string") {
+      return res.status(400).json({
+        error: "Invalid interview ID",
+      });
+    }
 
     const interview = await prisma.interview.findUnique({
       where: {
