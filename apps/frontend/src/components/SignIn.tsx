@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { GoogleLogin } from "@react-oauth/google";
 import { useNavigate } from "react-router";
+import { useEffect } from "react";
+import { useAuth } from "./AuthProvider";
 
 const BACKEND_URL = "http://localhost:3001";
 
@@ -10,6 +12,18 @@ type GoogleLoginResponse = {
 
 export function SignIn() {
   const navigate = useNavigate();
+
+  const {
+  user,
+  loading: authLoading,
+  refreshUser,
+} = useAuth();
+
+useEffect(() => {
+  if (!authLoading && user) {
+    navigate("/dashboard", { replace: true });
+  }
+}, [authLoading, user, navigate]);
 
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -51,7 +65,8 @@ export function SignIn() {
 
       console.log("Screenly user authenticated:", data.user);
 
-      navigate("/setup");
+      await refreshUser();
+      navigate("/dashboard", { replace: true });
     } catch (error) {
       console.error("Google authentication error:", error);
 

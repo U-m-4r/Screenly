@@ -21,10 +21,16 @@ export function Form() {
 
     setLoading(true);
 
-    const response = await axios.post(`${BACKEND_URL}/api/v1/pre-interview`, {
-      linkedin,
-      github,
-    });
+    const response = await axios.post(
+  `${BACKEND_URL}/api/v1/pre-interview`,
+  {
+    linkedin,
+    github,
+  },
+  {
+    withCredentials: true,
+  }
+);
 
     navigate(`/interview/${response.data.interviewId}`);
   }
