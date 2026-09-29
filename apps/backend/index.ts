@@ -95,6 +95,8 @@ async function requireAuth(
       return;
     }
 
+    res.locals.user = user;
+
     next();
   } catch (error) {
     console.error("Authentication error:", error);
@@ -395,6 +397,65 @@ app.post("/api/v1/auth/logout", async (req, res) => {
   }
 });
 
+app.post(
+  "/api/v1/company/onboarding",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const { name } = req.body;
+
+      if (typeof name !== "string" || !name.trim()) {
+        return res.status(400).json({
+          error: "Company name is required",
+        });
+      }
+
+      const companyName = name.trim();
+
+      // Check whether this user already belongs to a company.
+      const existingMembership =
+        await prisma.companyMember.findFirst({
+          where: {
+            userId: res.locals.user.id,
+          },
+          include: {
+            company: true,
+          },
+        });
+
+      if (existingMembership) {
+        return res.status(409).json({
+          error: "You already belong to a company",
+          company: existingMembership.company,
+        });
+      }
+
+      // Create the company and make the current user
+      // its first member.
+      const company = await prisma.company.create({
+        data: {
+          name: companyName,
+          members: {
+            create: {
+              userId: res.locals.user.id,
+            },
+          },
+        },
+      });
+
+      return res.status(201).json({
+        company,
+      });
+    } catch (error) {
+      console.error("Company onboarding error:", error);
+
+      return res.status(500).json({
+        error: "Failed to create company",
+      });
+    }
+  }
+);
+
 /*
 |--------------------------------------------------------------------------
 | Pre-interview
@@ -438,11 +499,12 @@ app.post("/api/v1/pre-interview", requireAuth, async (req, res) => {
     );
 
     const interview = await prisma.interview.create({
-      data: {
-        githubMetadata: userRepos.data,
-        status: "Pre",
-      },
-    });
+  data: {
+    githubMetadata: userRepos.data,
+    status: "Pre",
+    userId: res.locals.user.id,
+  },
+});
 
     return res.json({
       interviewId: interview.id,

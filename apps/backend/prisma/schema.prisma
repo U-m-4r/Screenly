@@ -7,17 +7,89 @@ datasource db {
   provider = "postgresql"
 }
 
+model User {
+  id          String          @id @default(uuid())
+  googleSub   String          @unique
+  email       String          @unique
+  name        String?
+  picture     String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  sessions    Session[]
+  interviews  Interview[]
+  memberships CompanyMember[]
+}
+
+model Company {
+  id          String          @id @default(uuid())
+  name        String
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  members     CompanyMember[]
+  candidates  Candidate[]
+  interviews  Interview[]
+}
+
+model CompanyMember {
+  id          String   @id @default(uuid())
+  userId      String
+  companyId   String
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, companyId])
+}
+
+model Candidate {
+  id          String      @id @default(uuid())
+  companyId   String
+  email       String
+  name        String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  company     Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  interviews  Interview[]
+
+  @@unique([companyId, email])
+}
+
 model Interview {
-  id             String          @id @default(uuid())
-  githubMetadata Json
-  status         InterviewStatus
-  score          Int             @default(0)
-  categories     Json?
-  improvements   Json?
-  strengths      Json?
-  summary        String?
-  topics         Json?
-  conversations  Message[]
+  id              String            @id @default(uuid())
+  userId          String
+  companyId       String?
+  candidateId     String?
+  githubMetadata  Json
+  status          InterviewStatus
+  score           Int               @default(0)
+  categories      Json?
+  improvements    Json?
+  strengths       Json?
+  summary         String?
+  topics          Json?
+
+  user            User              @relation(fields: [userId], references: [id])
+  company         Company?          @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  candidate       Candidate?        @relation(fields: [candidateId], references: [id], onDelete: SetNull)
+
+  conversations   Message[]
+  invite          InterviewInvite?
+}
+
+model InterviewInvite {
+  id              String      @id @default(uuid())
+  interviewId     String      @unique
+  candidateEmail  String
+  tokenHash       String      @unique
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+  createdAt       DateTime    @default(now())
+
+  interview       Interview   @relation(fields: [interviewId], references: [id], onDelete: Cascade)
 }
 
 model Message {
@@ -26,7 +98,17 @@ model Message {
   type        MessageType
   interviewId String
   createdAt   DateTime    @default(now())
-  interview   Interview   @relation(fields: [interviewId], references: [id])
+
+  interview   Interview   @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+}
+
+model Session {
+  id         String   @id @default(uuid())
+  tokenHash  String   @unique
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
 }
 
 enum MessageType {
@@ -38,25 +120,4 @@ enum InterviewStatus {
   Pre
   InProgress
   Done
-}
-
-model User {
-  id          String   @id @default(uuid())
-  googleSub   String   @unique
-  email       String   @unique
-  name        String?
-  picture     String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  sessions    Session[]
-}
-
-model Session {
-  id         String   @id @default(uuid())
-  tokenHash  String   @unique
-  userId     String
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  expiresAt  DateTime
-  createdAt  DateTime @default(now())
 }
