@@ -17,6 +17,8 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 import { Dashboard } from "./components/Dashboard";
 
 import { CompanySetup } from "./components/CompanySetup";
+import { CompanyChoice } from "./components/CompanyChoice";
+import { CompanyLogin } from "./components/CompanyLogin";
 
 export function App() {
   const [googleClientId, setGoogleClientId] = useState<string | null>(
@@ -108,12 +110,22 @@ export function App() {
           />
 
           <Route
+            path="/company/login"
+            element={<CompanyLogin />}
+          />
+
+          <Route
             path="/setup"
             element={
               <ProtectedRoute>
                 <Form />
               </ProtectedRoute>
             }
+          />
+
+          <Route
+            path="/company"
+            element={<CompanyChoice />}
           />
 
           <Route

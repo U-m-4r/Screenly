@@ -456,6 +456,35 @@ app.post(
   }
 );
 
+app.get("/api/v1/company", requireAuth, async (req, res) => {
+  try {
+    const membership = await prisma.companyMember.findFirst({
+      where: {
+        userId: res.locals.user.id,
+      },
+      include: {
+        company: true,
+      },
+    });
+
+    if (!membership) {
+      return res.status(404).json({
+        error: "You are not a member of a company",
+      });
+    }
+
+    return res.json({
+      company: membership.company,
+    });
+  } catch (error) {
+    console.error("Company fetch error:", error);
+
+    return res.status(500).json({
+      error: "Failed to fetch company",
+    });
+  }
+});
+
 /*
 |--------------------------------------------------------------------------
 | Pre-interview

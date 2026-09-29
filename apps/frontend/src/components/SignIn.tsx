@@ -89,7 +89,7 @@ export function SignIn() {
   }
 
   function handleCompanyClick() {
-    navigate("/company/setup");
+    navigate("/company");
   }
 
   return (

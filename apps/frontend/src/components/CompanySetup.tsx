@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { GoogleLogin } from "@react-oauth/google";
 import { useNavigate } from "react-router";
 import { useAuth } from "./AuthProvider";
@@ -9,6 +9,11 @@ type GoogleLoginResponse = {
   credential?: string;
 };
 
+type Company = {
+  id: string;
+  name: string;
+};
+
 export function CompanySetup() {
   const navigate = useNavigate();
   const { refreshUser } = useAuth();
@@ -17,9 +22,43 @@ export function CompanySetup() {
   const [website, setWebsite] = useState("");
   const [role, setRole] = useState("");
 
+  const [existingCompany, setExistingCompany] =
+    useState<Company | null>(null);
+
+  const [checkingCompany, setCheckingCompany] = useState(true);
   const [showGoogleLogin, setShowGoogleLogin] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    async function checkExistingCompany() {
+      try {
+        const response = await fetch(
+          `${BACKEND_URL}/api/v1/company`,
+          {
+            credentials: "include",
+          }
+        );
+
+        if (!response.ok) {
+          setExistingCompany(null);
+          return;
+        }
+
+        const data = await response.json();
+
+        if (data.company) {
+          setExistingCompany(data.company);
+        }
+      } catch (error) {
+        console.error("Company check failed:", error);
+      } finally {
+        setCheckingCompany(false);
+      }
+    }
+
+    void checkExistingCompany();
+  }, []);
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -34,92 +73,122 @@ export function CompanySetup() {
   }
 
   async function handleGoogleSuccess(
-    credentialResponse: GoogleLoginResponse
-  ) {
-    try {
-      setError("");
+  credentialResponse: GoogleLoginResponse
+) {
+  try {
+    setError("");
 
-      if (!credentialResponse.credential) {
-        setError("Google sign-in did not return a credential.");
+    if (!credentialResponse.credential) {
+      setError("Google sign-in did not return a credential.");
+      return;
+    }
+
+    setLoading(true);
+
+    // Step 1: Sign in with Google
+    const authResponse = await fetch(
+      `${BACKEND_URL}/api/v1/auth/google`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          credential: credentialResponse.credential,
+        }),
+      }
+    );
+
+    const authData = await authResponse.json();
+
+    if (!authResponse.ok) {
+      throw new Error(
+        authData.error || "Google authentication failed."
+      );
+    }
+
+    // Step 2: Check whether this user already has a company
+    const companyCheckResponse = await fetch(
+      `${BACKEND_URL}/api/v1/company`,
+      {
+        credentials: "include",
+      }
+    );
+
+    if (companyCheckResponse.ok) {
+      const companyData = await companyCheckResponse.json();
+
+      if (companyData.company) {
+        // Existing company — go straight to dashboard
+        await refreshUser();
+
+        navigate("/dashboard", {
+          replace: true,
+        });
+
         return;
       }
-
-      setLoading(true);
-
-      // First authenticate the Google user.
-      const authResponse = await fetch(
-        `${BACKEND_URL}/api/v1/auth/google`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          credentials: "include",
-          body: JSON.stringify({
-            credential: credentialResponse.credential,
-          }),
-        }
-      );
-
-      const authData = await authResponse.json();
-
-      if (!authResponse.ok) {
-        throw new Error(
-          authData.error || "Google authentication failed."
-        );
-      }
-
-      // Now create the company for the authenticated user.
-      const companyResponse = await fetch(
-        `${BACKEND_URL}/api/v1/company/onboarding`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          credentials: "include",
-          body: JSON.stringify({
-            name: companyName.trim(),
-            website: website.trim() || null,
-            role: role.trim() || null,
-          }),
-        }
-      );
-
-      const companyData = await companyResponse.json();
-
-      if (!companyResponse.ok) {
-        throw new Error(
-          companyData.error || "Failed to create company."
-        );
-      }
-
-      console.log(
-        "Company created:",
-        companyData.company
-      );
-
-      await refreshUser();
-
-      navigate("/dashboard", {
-        replace: true,
-      });
-    } catch (error) {
-      console.error("Company onboarding error:", error);
-
-      setError(
-        error instanceof Error
-          ? error.message
-          : "Unable to complete company setup."
-      );
-    } finally {
-      setLoading(false);
     }
+
+    // Step 3: No company yet — create one
+    const companyResponse = await fetch(
+      `${BACKEND_URL}/api/v1/company/onboarding`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          name: companyName.trim(),
+          website: website.trim() || null,
+          role: role.trim() || null,
+        }),
+      }
+    );
+
+    const companyData = await companyResponse.json();
+
+    if (!companyResponse.ok) {
+      throw new Error(
+        companyData.error || "Failed to create company."
+      );
+    }
+
+    console.log("Company created:", companyData.company);
+
+    await refreshUser();
+
+    navigate("/dashboard", {
+      replace: true,
+    });
+  } catch (error) {
+    console.error("Company onboarding error:", error);
+
+    setError(
+      error instanceof Error
+        ? error.message
+        : "Unable to complete company setup."
+    );
+  } finally {
+    setLoading(false);
   }
+}
 
   function handleGoogleError() {
     console.error("Google sign-in failed");
     setError("Google sign-in failed. Please try again.");
+  }
+
+  if (checkingCompany) {
+    return (
+      <div className="min-h-screen w-screen bg-gray-50 flex items-center justify-center px-6">
+        <p className="text-sm text-gray-500">
+          Checking your company account...
+        </p>
+      </div>
+    );
   }
 
   return (
@@ -136,16 +205,39 @@ export function CompanySetup() {
         <div className="rounded-xl border bg-white p-8 shadow-sm">
           <div className="mb-8">
             <h1 className="text-2xl font-bold tracking-tight text-gray-900">
-              Set up your company
+              {existingCompany
+                ? "Welcome back"
+                : "Set up your company"}
             </h1>
 
             <p className="mt-2 text-sm text-gray-500">
-              Tell us a little about your company to get started
-              with Screenly.
+              {existingCompany
+                ? "Your Screenly company account is already set up."
+                : "Tell us a little about your company to get started with Screenly."}
             </p>
           </div>
 
-          {!showGoogleLogin ? (
+          {existingCompany ? (
+            <div>
+              <div className="rounded-lg bg-gray-50 p-4">
+                <p className="text-sm text-gray-500">
+                  Your company
+                </p>
+
+                <p className="mt-1 text-lg font-semibold text-gray-900">
+                  {existingCompany.name}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => navigate("/dashboard")}
+                className="mt-6 w-full rounded-lg bg-gray-900 px-5 py-3 text-sm font-medium text-white transition hover:bg-gray-800"
+              >
+                Continue to Dashboard
+              </button>
+            </div>
+          ) : !showGoogleLogin ? (
             <form onSubmit={handleSubmit} className="space-y-5">
               <div>
                 <label
@@ -252,8 +344,7 @@ export function CompanySetup() {
                 </h2>
 
                 <p className="mt-2 text-sm text-gray-500">
-                  Sign in with Google to create your company
-                  account.
+                  Sign in with Google to create your company account.
                 </p>
               </div>
 
