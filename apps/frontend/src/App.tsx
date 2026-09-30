@@ -20,6 +20,9 @@ import { CompanySetup } from "./components/CompanySetup";
 import { CompanyChoice } from "./components/CompanyChoice";
 import { CompanyLogin } from "./components/CompanyLogin";
 
+import { CandidateLogin } from "./components/CandidateLogin";
+import { CandidateDashboard } from "./components/CandidateDashboard";
+
 export function App() {
   const [googleClientId, setGoogleClientId] = useState<string | null>(
     null
@@ -89,69 +92,88 @@ export function App() {
   }
 
   return (
-  <GoogleOAuthProvider clientId={googleClientId}>
-    <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<SignIn />} />
+    <GoogleOAuthProvider clientId={googleClientId}>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            {/* Landing / role selection */}
+            <Route path="/" element={<SignIn />} />
 
-          <Route
-            path="/dashboard"
-            element={
-              <ProtectedRoute>
-                <Dashboard />
-              </ProtectedRoute>
-            }
-          />
+            {/* Company flow */}
+            <Route
+              path="/company"
+              element={<CompanyChoice />}
+            />
 
-          <Route
-            path="/company/setup"
-            element={<CompanySetup />}
-          />
+            <Route
+              path="/company/setup"
+              element={<CompanySetup />}
+            />
 
-          <Route
-            path="/company/login"
-            element={<CompanyLogin />}
-          />
+            <Route
+              path="/company/login"
+              element={<CompanyLogin />}
+            />
 
-          <Route
-            path="/setup"
-            element={
-              <ProtectedRoute>
-                <Form />
-              </ProtectedRoute>
-            }
-          />
+            {/* Company dashboard */}
+            <Route
+              path="/dashboard"
+              element={
+                <ProtectedRoute>
+                  <Dashboard />
+                </ProtectedRoute>
+              }
+            />
 
-          <Route
-            path="/company"
-            element={<CompanyChoice />}
-          />
+            {/* Candidate flow */}
+            <Route
+              path="/candidate/login"
+              element={<CandidateLogin />}
+            />
 
-          <Route
-            path="/interview/:id"
-            element={
-              <ProtectedRoute>
-                <Interview />
-              </ProtectedRoute>
-            }
-          />
+            <Route
+              path="/candidate/dashboard"
+              element={
+                <ProtectedRoute>
+                  <CandidateDashboard />
+                </ProtectedRoute>
+              }
+            />
 
-          <Route
-            path="/results/:id"
-            element={
-              <ProtectedRoute>
-                <Result />
-              </ProtectedRoute>
-            }
-          />
-        </Routes>
+            {/* Existing interview flow */}
+            <Route
+              path="/setup"
+              element={
+                <ProtectedRoute>
+                  <Form />
+                </ProtectedRoute>
+              }
+            />
 
-        <Toaster position="top-right" />
-      </BrowserRouter>
-    </AuthProvider>
-  </GoogleOAuthProvider>
-);
+            <Route
+              path="/interview/:id"
+              element={
+                <ProtectedRoute>
+                  <Interview />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/results/:id"
+              element={
+                <ProtectedRoute>
+                  <Result />
+                </ProtectedRoute>
+              }
+            />
+          </Routes>
+
+          <Toaster position="top-right" />
+        </BrowserRouter>
+      </AuthProvider>
+    </GoogleOAuthProvider>
+  );
 }
 
 export default App;

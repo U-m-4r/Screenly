@@ -485,6 +485,226 @@ app.get("/api/v1/company", requireAuth, async (req, res) => {
   }
 });
 
+app.get(
+  "/api/v1/company/candidates",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const membership = await prisma.companyMember.findFirst({
+        where: {
+          userId: res.locals.user.id,
+        },
+        select: {
+          companyId: true,
+        },
+      });
+
+      if (!membership) {
+        return res.status(404).json({
+          error: "You are not a member of a company",
+        });
+      }
+
+      const candidates = await prisma.candidate.findMany({
+        where: {
+          companyId: membership.companyId,
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+      });
+
+      return res.json({
+        candidates,
+      });
+    } catch (error) {
+      console.error("Candidate fetch error:", error);
+
+      return res.status(500).json({
+        error: "Failed to fetch candidates",
+      });
+    }
+  }
+);
+
+app.post(
+  "/api/v1/company/candidates",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const { email, name } = req.body;
+
+      if (typeof email !== "string" || !email.trim()) {
+        return res.status(400).json({
+          error: "Candidate email is required",
+        });
+      }
+
+      const candidateEmail = email.trim().toLowerCase();
+
+      const candidateName =
+        typeof name === "string" && name.trim()
+          ? name.trim()
+          : null;
+
+      const membership = await prisma.companyMember.findFirst({
+        where: {
+          userId: res.locals.user.id,
+        },
+        select: {
+          companyId: true,
+        },
+      });
+
+      if (!membership) {
+        return res.status(404).json({
+          error: "You are not a member of a company",
+        });
+      }
+
+      const existingCandidate =
+        await prisma.candidate.findUnique({
+          where: {
+            companyId_email: {
+              companyId: membership.companyId,
+              email: candidateEmail,
+            },
+          },
+        });
+
+      if (existingCandidate) {
+        return res.status(409).json({
+          error: "This candidate already exists",
+          candidate: existingCandidate,
+        });
+      }
+
+      const candidate = await prisma.candidate.create({
+        data: {
+          companyId: membership.companyId,
+          email: candidateEmail,
+          name: candidateName,
+        },
+      });
+
+      return res.status(201).json({
+        candidate,
+      });
+    } catch (error) {
+      console.error("Candidate creation error:", error);
+
+      return res.status(500).json({
+        error: "Failed to create candidate",
+      });
+    }
+  }
+);
+
+app.post(
+  "/api/v1/company/candidates/:candidateId/interview",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const { candidateId } = req.params;
+
+      if (typeof candidateId !== "string") {
+        return res.status(400).json({
+          error: "Invalid candidate ID",
+        });
+      }
+
+      // Find the company belonging to the logged-in user
+      const membership = await prisma.companyMember.findFirst({
+        where: {
+          userId: res.locals.user.id,
+        },
+        select: {
+          companyId: true,
+        },
+      });
+
+      if (!membership) {
+        return res.status(404).json({
+          error: "You are not a member of a company",
+        });
+      }
+
+      // Make sure this candidate belongs to the user's company
+      const candidate = await prisma.candidate.findFirst({
+        where: {
+          id: candidateId,
+          companyId: membership.companyId,
+        },
+      });
+
+      if (!candidate) {
+        return res.status(404).json({
+          error: "Candidate not found",
+        });
+      }
+
+      // Create a secure random invite token
+      const inviteToken = crypto.randomBytes(32).toString("hex");
+
+      // Only the hash is stored in the database
+      const tokenHash = crypto
+        .createHash("sha256")
+        .update(inviteToken)
+        .digest("hex");
+
+      // Invite expires in 7 days
+      const expiresAt = new Date(
+        Date.now() + 7 * 24 * 60 * 60 * 1000
+      );
+
+      const result = await prisma.$transaction(async (tx) => {
+        const interview = await tx.interview.create({
+          data: {
+            userId: res.locals.user.id,
+            companyId: membership.companyId,
+            candidateId: candidate.id,
+            githubMetadata: {},
+            status: "Pre",
+          },
+        });
+
+        const invite = await tx.interviewInvite.create({
+          data: {
+            interviewId: interview.id,
+            candidateEmail: candidate.email,
+            tokenHash,
+            expiresAt,
+          },
+        });
+
+        return {
+          interview,
+          invite,
+        };
+      });
+
+      const inviteUrl =
+        `http://localhost:3000/candidate/invite/${inviteToken}`;
+
+      return res.status(201).json({
+        interview: result.interview,
+        invite: {
+          id: result.invite.id,
+          candidateEmail: result.invite.candidateEmail,
+          expiresAt: result.invite.expiresAt,
+          url: inviteUrl,
+        },
+      });
+    } catch (error) {
+      console.error("Interview creation error:", error);
+
+      return res.status(500).json({
+        error: "Failed to create interview",
+      });
+    }
+  }
+);
+
 /*
 |--------------------------------------------------------------------------
 | Pre-interview
