@@ -34,6 +34,7 @@ packages/
 - GitHub token with permission to read public repository data
 - Deepgram API key
 - Groq API key for post-interview evaluation
+- Resend API key and a verified sender address for interview invitations
 
 ## Getting Started
 
@@ -64,6 +65,7 @@ In Google Cloud Console, add the frontend origin, usually
 Generate the Prisma client and apply migrations:
 
 ```sh
+cd ../backend
 bunx prisma generate
 bunx prisma migrate deploy
 ```
@@ -86,6 +88,25 @@ bun run dev
 
 The API listens on `http://localhost:3001`. The frontend development server
 prints its local URL when it starts.
+
+## Application Flows
+
+### Company invitations
+
+1. A company user signs in with Google and creates a company.
+2. The company adds a candidate by email and sends an interview invitation.
+3. The candidate opens the emailed link, signs in with the invited Google
+   account, and accepts the invitation.
+4. The candidate submits GitHub and LinkedIn URLs. Screenly loads the public
+   GitHub repositories and opens the live interview.
+5. After the interview ends, the backend saves the transcript and Groq
+   evaluation. The company and candidate dashboards can view the result.
+
+### Direct candidate interviews
+
+Candidates can also sign in and submit their GitHub and LinkedIn URLs through
+the direct pre-interview flow. This creates an interview without a company
+invitation.
 
 ## Environment Variables
 
@@ -136,6 +157,37 @@ The response contains the created interview ID:
 }
 ```
 
+### Authentication
+
+- `POST /api/v1/auth/google` verifies a Google Identity Services credential
+  and creates a seven-day HTTP-only `screenly_session` cookie.
+- `GET /api/v1/auth/me` returns the signed-in user or `401`.
+- `POST /api/v1/auth/logout` invalidates the current session and clears the
+  cookie.
+
+### Company and candidate management
+
+- `POST /api/v1/company/onboarding` creates a company for the signed-in user.
+  Body: `{ "name": "Example Company" }`.
+- `GET /api/v1/company` returns the signed-in user's company.
+- `GET /api/v1/company/candidates` lists the company's candidates and their
+  interview summaries.
+- `POST /api/v1/company/candidates` creates a candidate. Body: `{ "email":
+"candidate@example.com", "name": "Candidate Name" }`.
+- `POST /api/v1/company/candidates/:candidateId/interview` creates an
+  interview and sends an email invitation through Resend.
+
+### Candidate invitations
+
+- `GET /api/v1/candidate/invite/:token` validates an invitation without
+  authentication.
+- `POST /api/v1/candidate/invite/:token/accept` accepts the invitation after
+  verifying that the signed-in Google email matches the invited email.
+- `GET /api/v1/candidate/interviews` lists interviews for the signed-in
+  candidate.
+- `POST /api/v1/candidate/interviews/:interviewId/setup` saves the invited
+  candidate's GitHub and LinkedIn URLs on the existing interview.
+
 ### `GET /api/v1/results/:id`
 
 Returns the interview status, persisted evaluation, and authoritative
@@ -145,10 +197,14 @@ summary, strengths, improvements, and discussed topics.
 
 ### WebSocket `/ws/interview/:id`
 
-The interview client sends microphone audio and an `end` control message. The
-backend manages the Deepgram connection, persists the transcript, and evaluates
-the completed interview. The browser does not send transcript or evaluation
-data.
+The interview client sends 16 kHz microphone audio as binary messages and an
+`{ "type": "end" }` control message. The server sends 24 kHz audio back as
+binary messages and JSON events including `ready`, `conversation-turn`,
+`user-started-speaking`, `agent-thinking`, `agent-audio-done`,
+`evaluation-complete`, `evaluation-error`, `deepgram-disconnected`, and
+`error`. The browser does not send transcript or evaluation data. When the
+client ends the session, transcript writes are flushed before the evaluation
+is persisted.
 
 ## Development Commands
 
@@ -163,6 +219,6 @@ bun run format      # Format TypeScript and Markdown files
 
 ## Status
 
-Screenly is under active development. Google sign-in, the interview pipeline,
-transcript persistence, post-interview evaluation, and the results view are
-implemented. Interview ownership and protected routes are still being expanded.
+Screenly is under active development. Google sign-in, company onboarding,
+candidate invitations, protected dashboards, the interview pipeline, transcript
+persistence, post-interview evaluation, and the results view are implemented.

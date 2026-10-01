@@ -47,15 +47,55 @@ Resend variables are only required for company invitation emails.
 
 ## API
 
-- `POST /api/v1/pre-interview` loads the candidate's GitHub repositories and
-  creates an interview. The request body contains `github` and `linkedin` URLs.
-- `POST /api/v1/auth/google` verifies a Google Identity Services credential and
-  creates a session cookie.
-- `GET /api/v1/results/:id` returns the persisted interview status, evaluation,
-  and transcript.
-- `GET /api/deepgram-token` creates a temporary Deepgram token.
-- `WS /ws/interview/:id` streams microphone audio to Deepgram and sends
-  completed conversation turns back to the browser.
+All `/api/v1` routes except invite validation require the HTTP-only
+`screenly_session` cookie created by Google authentication.
+
+### Authentication
+
+- `POST /api/v1/auth/google` verifies a Google Identity Services credential in
+  `{ "credential": "..." }` and creates a seven-day session cookie.
+- `GET /api/v1/auth/me` returns the current user.
+- `POST /api/v1/auth/logout` invalidates the current session and clears the
+  cookie.
+
+### Company and candidate management
+
+- `POST /api/v1/company/onboarding` creates a company from `{ "name": "..." }`.
+- `GET /api/v1/company` returns the current user's company.
+- `GET /api/v1/company/candidates` lists candidates belonging to that company.
+- `POST /api/v1/company/candidates` creates a candidate from `email` and an
+  optional `name`.
+- `POST /api/v1/company/candidates/:candidateId/interview` creates an
+  interview for a company candidate and sends a Resend invitation email.
+
+### Candidate interviews
+
+- `GET /api/v1/candidate/invite/:token` validates an invite without requiring
+  authentication.
+- `POST /api/v1/candidate/invite/:token/accept` accepts an invite when the
+  authenticated Google email matches the invited email.
+- `GET /api/v1/candidate/interviews` lists interviews for the current
+  candidate.
+- `POST /api/v1/candidate/interviews/:interviewId/setup` stores GitHub and
+  LinkedIn URLs for an invited interview and loads the candidate's GitHub
+  repositories.
+- `POST /api/v1/pre-interview` creates a direct interview from `github` and
+  `linkedin` URLs and loads the public GitHub repositories.
+
+### Interview results and audio
+
+- `GET /api/v1/results/:id` returns the persisted status, evaluation, and
+  authoritative transcript.
+- `GET /api/deepgram-token` creates a temporary Deepgram access token.
+- `WS /ws/interview/:id` streams 16 kHz microphone audio to Deepgram and
+  returns 24 kHz audio plus JSON conversation/status events.
+
+The WebSocket client sends binary microphone frames and finishes with
+`{ "type": "end" }`. The server emits `ready`, `conversation-turn`,
+`user-started-speaking`, `agent-thinking`, `agent-audio-done`,
+`evaluation-complete`, `evaluation-error`, `deepgram-disconnected`, and
+`error` events. On `end`, queued transcript writes are flushed before Groq
+evaluation is saved.
 
 When the client sends the `end` control message, the backend waits for queued
 transcript writes, evaluates the authoritative PostgreSQL transcript with
