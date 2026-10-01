@@ -512,6 +512,15 @@ app.get(
         orderBy: {
           createdAt: "desc",
         },
+        include: {
+          interviews: {
+            select: {
+              id: true,
+              status: true,
+              score: true
+            },
+          },
+        },
       });
 
       return res.json({
@@ -705,6 +714,243 @@ app.post(
   }
 );
 
+app.get(
+  "/api/v1/candidate/invite/:token",
+  async (req, res) => {
+    try {
+      const { token } = req.params;
+
+      if (typeof token !== "string" || !token) {
+        return res.status(400).json({
+          error: "Invalid invite token",
+        });
+      }
+
+      // Hash the token so we can safely compare it
+      // with the hash stored in PostgreSQL.
+      const tokenHash = crypto
+        .createHash("sha256")
+        .update(token)
+        .digest("hex");
+
+      const invite = await prisma.interviewInvite.findUnique({
+        where: {
+          tokenHash,
+        },
+        include: {
+          interview: {
+            include: {
+              candidate: true,
+              company: true,
+            },
+          },
+        },
+      });
+
+      if (!invite) {
+        return res.status(404).json({
+          error: "Interview invite not found",
+        });
+      }
+
+      if (invite.expiresAt <= new Date()) {
+        return res.status(410).json({
+          error: "This interview invite has expired",
+        });
+      }
+
+      if (invite.acceptedAt) {
+        return res.status(409).json({
+          error: "This interview invite has already been used",
+        });
+      }
+
+      return res.json({
+        invite: {
+          id: invite.id,
+          candidateEmail: invite.candidateEmail,
+          expiresAt: invite.expiresAt,
+        },
+        interview: {
+          id: invite.interview.id,
+          status: invite.interview.status,
+        },
+        candidate: invite.interview.candidate
+          ? {
+              id: invite.interview.candidate.id,
+              name: invite.interview.candidate.name,
+              email: invite.interview.candidate.email,
+            }
+          : null,
+        company: invite.interview.company
+          ? {
+              id: invite.interview.company.id,
+              name: invite.interview.company.name,
+            }
+          : null,
+      });
+    } catch (error) {
+      console.error("Invite validation error:", error);
+
+      return res.status(500).json({
+        error: "Failed to validate interview invite",
+      });
+    }
+  }
+);
+
+app.post(
+  "/api/v1/candidate/invite/:token/accept",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const { token } = req.params;
+
+      if (typeof token !== "string" || !token) {
+        return res.status(400).json({
+          error: "Invalid invite token",
+        });
+      }
+
+      const tokenHash = crypto
+        .createHash("sha256")
+        .update(token)
+        .digest("hex");
+
+      const invite = await prisma.interviewInvite.findUnique({
+        where: { tokenHash },
+        include: {
+          interview: {
+            include: {
+              candidate: true,
+              company: true,
+            },
+          },
+        },
+      });
+
+      if (!invite) {
+        return res.status(404).json({
+          error: "Interview invite not found",
+        });
+      }
+
+      if (invite.expiresAt <= new Date()) {
+        return res.status(410).json({
+          error: "This interview invite has expired",
+        });
+      }
+
+      const authenticatedEmail = res.locals.user.email
+        .trim()
+        .toLowerCase();
+
+      const invitedEmail = invite.candidateEmail
+        .trim()
+        .toLowerCase();
+
+      if (authenticatedEmail !== invitedEmail) {
+        return res.status(403).json({
+          error:
+            "This interview invite was sent to a different Google account.",
+        });
+      }
+
+      if (invite.acceptedAt) {
+        return res.status(409).json({
+          error: "This interview invite has already been accepted.",
+        });
+      }
+
+      await prisma.interviewInvite.update({
+        where: { id: invite.id },
+        data: {
+          acceptedAt: new Date(),
+        },
+      });
+
+      return res.json({
+        interviewId: invite.interviewId,
+
+        candidate: invite.interview.candidate
+          ? {
+              id: invite.interview.candidate.id,
+              name: invite.interview.candidate.name,
+              email: invite.interview.candidate.email,
+            }
+          : null,
+
+        company: invite.interview.company
+          ? {
+              id: invite.interview.company.id,
+              name: invite.interview.company.name,
+            }
+          : null,
+      });
+    } catch (error) {
+      console.error("Invite acceptance error:", error);
+
+      return res.status(500).json({
+        error: "Failed to accept interview invite",
+      });
+    }
+  }
+);
+
+app.get(
+  "/api/v1/candidate/interviews",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const authenticatedEmail = res.locals.user.email
+        .trim()
+        .toLowerCase();
+
+      const interviews = await prisma.interview.findMany({
+        where: {
+          candidate: {
+            email: authenticatedEmail,
+          },
+        },
+        include: {
+          company: true,
+          candidate: true,
+        },
+        orderBy: {
+          id: "desc",
+        },
+      });
+
+      return res.json({
+        interviews: interviews.map((interview) => ({
+          id: interview.id,
+          status: interview.status,
+          score: interview.score,
+          company: interview.company
+            ? {
+                id: interview.company.id,
+                name: interview.company.name,
+              }
+            : null,
+          candidate: interview.candidate
+            ? {
+                id: interview.candidate.id,
+                name: interview.candidate.name,
+                email: interview.candidate.email,
+              }
+            : null,
+        })),
+      });
+    } catch (error) {
+      console.error("Candidate interviews fetch error:", error);
+
+      return res.status(500).json({
+        error: "Failed to load candidate interviews",
+      });
+    }
+  }
+);
+
 /*
 |--------------------------------------------------------------------------
 | Pre-interview
@@ -766,6 +1012,179 @@ app.post("/api/v1/pre-interview", requireAuth, async (req, res) => {
     });
   }
 });
+
+/*
+|--------------------------------------------------------------------------
+| Candidate interview setup
+|--------------------------------------------------------------------------
+|
+| Used when a candidate arrives through a company invitation.
+| The interview already exists, so we UPDATE it instead of creating
+| another interview.
+|
+*/
+
+app.post(
+  "/api/v1/candidate/interviews/:interviewId/setup",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const interviewId = req.params.interviewId;
+
+      if (typeof interviewId !== "string" || !interviewId) {
+        return res.status(400).json({
+          error: "Invalid interview ID",
+        });
+      }
+
+      const { success, data } =
+        PreInterviewRequestSchema.safeParse(req.body);
+
+      if (!success) {
+        return res.status(411).json({
+          error: "Incorrect request body",
+        });
+      }
+
+      /*
+      Find the existing interview and its invite.
+      */
+
+      const interview =
+        await prisma.interview.findUnique({
+          where: {
+            id: interviewId,
+          },
+          include: {
+            candidate: true,
+            invite: true,
+          },
+        });
+
+      if (!interview) {
+        return res.status(404).json({
+          error: "Interview not found",
+        });
+      }
+
+      /*
+      This endpoint is only for interviews created
+      through the candidate invitation system.
+      */
+
+      if (!interview.candidate) {
+        return res.status(400).json({
+          error: "This interview is not linked to a candidate",
+        });
+      }
+
+      if (!interview.invite) {
+        return res.status(400).json({
+          error: "This interview does not have a valid invitation",
+        });
+      }
+
+      /*
+      Make sure the authenticated Google account belongs
+      to the invited candidate.
+      */
+
+      const authenticatedEmail =
+        res.locals.user.email.trim().toLowerCase();
+
+      const candidateEmail =
+        interview.candidate.email.trim().toLowerCase();
+
+      if (authenticatedEmail !== candidateEmail) {
+        return res.status(403).json({
+          error:
+            "This interview belongs to a different candidate.",
+        });
+      }
+
+      /*
+      The candidate must have accepted the invitation
+      before setting up the interview.
+      */
+
+      // if (!interview.invite.acceptedAt) {
+      //   return res.status(403).json({
+      //     error:
+      //       "Please accept the interview invitation before continuing.",
+      //   });
+      // }
+
+      /*
+      Normalize the URLs.
+      */
+
+      const githubUrl = data.github.endsWith("/")
+        ? data.github.slice(0, -1)
+        : data.github;
+
+      const linkedinUrl = data.linkedin.endsWith("/")
+        ? data.linkedin.slice(0, -1)
+        : data.linkedin;
+
+      const githubUsername =
+        githubUrl.split("/").pop();
+
+      const linkedinUsername =
+        linkedinUrl.split("/").pop();
+
+      console.log(
+        "Candidate GitHub username:",
+        githubUsername
+      );
+
+      console.log(
+        "Candidate LinkedIn username:",
+        linkedinUsername
+      );
+
+      /*
+      Fetch the candidate's public GitHub repositories.
+      */
+
+      const userRepos = await axios.get(
+        `https://api.github.com/users/${githubUsername}/repos`,
+        {
+          headers: {
+            Accept: "application/vnd.github+json",
+            Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+            "X-GitHub-Api-Version": "2026-03-10",
+          },
+        }
+      );
+
+      /*
+      Update the interview that the company already created.
+      */
+
+      await prisma.interview.update({
+        where: {
+          id: interview.id,
+        },
+        data: {
+          githubMetadata: userRepos.data,
+        },
+      });
+
+      return res.json({
+        interviewId: interview.id,
+      });
+    } catch (error) {
+      console.error(
+        "Candidate interview setup error:",
+        error
+      );
+
+      return res.status(500).json({
+        error: "Failed to prepare candidate interview",
+      });
+    }
+  }
+);
 
 /*
 |--------------------------------------------------------------------------

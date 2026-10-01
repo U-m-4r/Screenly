@@ -22,6 +22,7 @@ import { CompanyLogin } from "./components/CompanyLogin";
 
 import { CandidateLogin } from "./components/CandidateLogin";
 import { CandidateDashboard } from "./components/CandidateDashboard";
+import { CandidateInvite } from "./components/CandidateInvite";
 
 export function App() {
   const [googleClientId, setGoogleClientId] = useState<string | null>(
@@ -123,6 +124,11 @@ export function App() {
                   <Dashboard />
                 </ProtectedRoute>
               }
+            />
+
+            <Route
+              path="/candidate/invite/:token"
+              element={<CandidateInvite />}
             />
 
             {/* Candidate flow */}

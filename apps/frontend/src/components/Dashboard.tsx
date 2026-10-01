@@ -11,6 +11,15 @@ type Company = {
   updatedAt: string;
 };
 
+type InterviewStatus = "Pre" | "InProgress" | "Done";
+
+type CandidateInterview = {
+  id: string;
+  status: InterviewStatus;
+  score: number;
+  createdAt: string;
+};
+
 type Candidate = {
   id: string;
   companyId: string;
@@ -18,6 +27,7 @@ type Candidate = {
   name: string | null;
   createdAt: string;
   updatedAt: string;
+  interviews: CandidateInterview[];
 };
 
 export function Dashboard() {
@@ -27,41 +37,87 @@ export function Dashboard() {
   const [company, setCompany] = useState<Company | null>(null);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
 
-  const [creatingInterview, setCreatingInterview] = useState<string | null>(
-    null
-  );
+  const [statusFilter, setStatusFilter] = useState<
+    "All" | InterviewStatus
+  >("All");
+
+  const [creatingInterview, setCreatingInterview] =
+    useState<string | null>(null);
+
   const [inviteUrl, setInviteUrl] = useState("");
-  const [inviteCandidateName, setInviteCandidateName] = useState("");
+  const [inviteCandidateName, setInviteCandidateName] =
+    useState("");
   const [interviewError, setInterviewError] = useState("");
 
   const [loadingCompany, setLoadingCompany] = useState(true);
-  const [loadingCandidates, setLoadingCandidates] = useState(true);
+  const [loadingCandidates, setLoadingCandidates] =
+    useState(true);
 
   const [companyError, setCompanyError] = useState("");
   const [candidateError, setCandidateError] = useState("");
 
-  const [showAddCandidate, setShowAddCandidate] = useState(false);
+  const [showAddCandidate, setShowAddCandidate] =
+    useState(false);
+
   const [candidateName, setCandidateName] = useState("");
   const [candidateEmail, setCandidateEmail] = useState("");
 
-  const [addingCandidate, setAddingCandidate] = useState(false);
-  const [addCandidateError, setAddCandidateError] = useState("");
+  const [addingCandidate, setAddingCandidate] =
+    useState(false);
+
+  const [addCandidateError, setAddCandidateError] =
+    useState("");
 
   const [signingOut, setSigningOut] = useState(false);
   const [error, setError] = useState("");
+
+  function getInterviewStatusLabel(
+    status: InterviewStatus
+  ) {
+    switch (status) {
+      case "Pre":
+        return "Pending";
+
+      case "InProgress":
+        return "In Progress";
+
+      case "Done":
+        return "Completed";
+    }
+  }
+
+  function getInterviewStatusClass(
+    status: InterviewStatus
+  ) {
+    switch (status) {
+      case "Pre":
+        return "bg-yellow-50 text-yellow-700";
+
+      case "InProgress":
+        return "bg-blue-50 text-blue-700";
+
+      case "Done":
+        return "bg-green-50 text-green-700";
+    }
+  }
 
   async function loadCompany() {
     try {
       setCompanyError("");
 
-      const response = await fetch(`${BACKEND_URL}/api/v1/company`, {
-        credentials: "include",
-      });
+      const response = await fetch(
+        `${BACKEND_URL}/api/v1/company`,
+        {
+          credentials: "include",
+        }
+      );
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "Failed to load company");
+        throw new Error(
+          data.error || "Failed to load company"
+        );
       }
 
       setCompany(data.company);
@@ -122,7 +178,9 @@ export function Dashboard() {
     event.preventDefault();
 
     if (!candidateEmail.trim()) {
-      setAddCandidateError("Candidate email is required.");
+      setAddCandidateError(
+        "Candidate email is required."
+      );
       return;
     }
 
@@ -174,7 +232,9 @@ export function Dashboard() {
     }
   }
 
-  async function handleCreateInterview(candidate: Candidate) {
+  async function handleCreateInterview(
+    candidate: Candidate
+  ) {
     try {
       setCreatingInterview(candidate.id);
       setInterviewError("");
@@ -198,11 +258,18 @@ export function Dashboard() {
       }
 
       setInviteUrl(data.invite.url);
+
       setInviteCandidateName(
         candidate.name || candidate.email
       );
+
+      // Refresh candidate/interview data after creation.
+      await loadCandidates();
     } catch (error) {
-      console.error("Create interview error:", error);
+      console.error(
+        "Create interview error:",
+        error
+      );
 
       setInterviewError(
         error instanceof Error
@@ -221,13 +288,44 @@ export function Dashboard() {
 
       await logout();
 
-      navigate("/", { replace: true });
+      navigate("/", {
+        replace: true,
+      });
     } catch {
-      setError("Unable to sign out. Try again.");
+      setError(
+        "Unable to sign out. Try again."
+      );
     } finally {
       setSigningOut(false);
     }
   }
+
+  const allInterviews = candidates.flatMap(
+    (candidate) => candidate.interviews || []
+  );
+
+  const pendingCount = allInterviews.filter(
+    (interview) => interview.status === "Pre"
+  ).length;
+
+  const inProgressCount = allInterviews.filter(
+    (interview) =>
+      interview.status === "InProgress"
+  ).length;
+
+  const completedCount = allInterviews.filter(
+    (interview) => interview.status === "Done"
+  ).length;
+
+  const filteredCandidates =
+    statusFilter === "All"
+      ? candidates
+      : candidates.filter((candidate) =>
+          candidate.interviews?.some(
+            (interview) =>
+              interview.status === statusFilter
+          )
+        );
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -282,11 +380,14 @@ export function Dashboard() {
 
               <h2 className="mt-2 text-3xl font-bold tracking-tight text-gray-900">
                 Welcome back
-                {user?.name ? `, ${user.name}` : ""}
+                {user?.name
+                  ? `, ${user.name}`
+                  : ""}
               </h2>
 
               <p className="mt-3 text-gray-500">
-                Manage candidates and technical interviews for{" "}
+                Manage candidates and technical
+                interviews for{" "}
                 <span className="font-medium text-gray-700">
                   {company.name}
                 </span>
@@ -294,6 +395,7 @@ export function Dashboard() {
               </p>
             </div>
 
+            {/* Summary */}
             <div className="mt-10 grid gap-6 sm:grid-cols-2">
               <div className="rounded-xl border bg-white p-6 shadow-sm">
                 <p className="text-sm font-medium text-gray-500">
@@ -315,12 +417,85 @@ export function Dashboard() {
                 </p>
 
                 <p className="mt-3 text-3xl font-bold text-gray-900">
-                  0
+                  {allInterviews.length}
                 </p>
 
                 <p className="mt-2 text-sm text-gray-400">
                   Interviews created
                 </p>
+              </div>
+            </div>
+
+            {/* Status filters */}
+            <div className="mt-8 rounded-xl border bg-white p-4 shadow-sm">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setStatusFilter("All")
+                  }
+                  className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+                    statusFilter === "All"
+                      ? "bg-gray-900 text-white"
+                      : "border border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  All{" "}
+                  <span className="ml-1 opacity-70">
+                    {allInterviews.length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setStatusFilter("Pre")
+                  }
+                  className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+                    statusFilter === "Pre"
+                      ? "bg-yellow-100 text-yellow-800"
+                      : "border border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  Pending{" "}
+                  <span className="ml-1 opacity-70">
+                    {pendingCount}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setStatusFilter("InProgress")
+                  }
+                  className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+                    statusFilter === "InProgress"
+                      ? "bg-blue-100 text-blue-800"
+                      : "border border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  In Progress{" "}
+                  <span className="ml-1 opacity-70">
+                    {inProgressCount}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setStatusFilter("Done")
+                  }
+                  className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+                    statusFilter === "Done"
+                      ? "bg-green-100 text-green-800"
+                      : "border border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  Completed{" "}
+                  <span className="ml-1 opacity-70">
+                    {completedCount}
+                  </span>
+                </button>
               </div>
             </div>
 
@@ -330,6 +505,7 @@ export function Dashboard() {
               </div>
             )}
 
+            {/* Candidates */}
             <div className="mt-8 rounded-xl border bg-white shadow-sm">
               <div className="flex items-center justify-between border-b px-6 py-5">
                 <div>
@@ -373,7 +549,8 @@ export function Dashboard() {
                   </p>
 
                   <p className="mt-1 text-sm text-gray-500">
-                    Add your first candidate to get started.
+                    Add your first candidate to get
+                    started.
                   </p>
 
                   <button
@@ -387,39 +564,118 @@ export function Dashboard() {
                     + Add Candidate
                   </button>
                 </div>
+              ) : filteredCandidates.length === 0 ? (
+                <div className="px-6 py-12 text-center">
+                  <p className="text-sm font-medium text-gray-900">
+                    No matching interviews
+                  </p>
+
+                  <p className="mt-1 text-sm text-gray-500">
+                    There are no candidates with
+                    this interview status.
+                  </p>
+                </div>
               ) : (
                 <div className="divide-y">
-                  {candidates.map((candidate) => (
-                    <div
-                      key={candidate.id}
-                      className="flex items-center justify-between gap-6 px-6 py-5"
-                    >
-                      <div>
-                        <p className="font-medium text-gray-900">
-                          {candidate.name || "Unnamed candidate"}
-                        </p>
+                  {filteredCandidates.map(
+                    (candidate) => {
+                      const interviews =
+                        candidate.interviews || [];
 
-                        <p className="mt-1 text-sm text-gray-500">
-                          {candidate.email}
-                        </p>
-                      </div>
+                      return (
+                        <div
+                          key={candidate.id}
+                          className="flex flex-col gap-5 px-6 py-5 lg:flex-row lg:items-center lg:justify-between"
+                        >
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-3">
+                              <p className="font-medium text-gray-900">
+                                {candidate.name ||
+                                  "Unnamed candidate"}
+                              </p>
 
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleCreateInterview(candidate)
-                        }
-                        disabled={
-                          creatingInterview === candidate.id
-                        }
-                        className="shrink-0 rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {creatingInterview === candidate.id
-                          ? "Creating..."
-                          : "Create Interview"}
-                      </button>
-                    </div>
-                  ))}
+                              {interviews.length >
+                                0 && (
+                                <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600">
+                                  {interviews.length}{" "}
+                                  {interviews.length ===
+                                  1
+                                    ? "interview"
+                                    : "interviews"}
+                                </span>
+                              )}
+                            </div>
+
+                            <p className="mt-1 text-sm text-gray-500">
+                              {candidate.email}
+                            </p>
+
+                            {interviews.length >
+                            0 ? (
+                              <div className="mt-3 flex flex-wrap gap-3">
+                                {interviews.map(
+                                  (interview) => (
+                                    <div
+                                      key={
+                                        interview.id
+                                      }
+                                      className="flex items-center gap-2"
+                                    >
+                                      <span
+                                        className={`rounded-full px-3 py-1 text-xs font-medium ${getInterviewStatusClass(
+                                          interview.status
+                                        )}`}
+                                      >
+                                        {getInterviewStatusLabel(
+                                          interview.status
+                                        )}
+                                      </span>
+
+                                      {interview.status ===
+                                        "Done" && (
+                                        <span className="text-xs text-gray-500">
+                                          Score:{" "}
+                                          {
+                                            interview.score
+                                          }
+                                        </span>
+                                      )}
+                                    </div>
+                                  )
+                                )}
+                              </div>
+                            ) : (
+                              <p className="mt-2 text-xs text-gray-400">
+                                No interviews
+                                created yet
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="flex shrink-0 items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleCreateInterview(
+                                  candidate
+                                )
+                              }
+                              disabled={
+                                creatingInterview ===
+                                candidate.id
+                              }
+                              className="rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {creatingInterview ===
+                              candidate.id
+                                ? "Creating..."
+                                : "Create Interview"}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    }
+                  )}
                 </div>
               )}
             </div>
@@ -433,6 +689,7 @@ export function Dashboard() {
         )}
       </main>
 
+      {/* Add Candidate Modal */}
       {showAddCandidate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-6">
           <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
@@ -477,7 +734,9 @@ export function Dashboard() {
                   type="text"
                   value={candidateName}
                   onChange={(event) =>
-                    setCandidateName(event.target.value)
+                    setCandidateName(
+                      event.target.value
+                    )
                   }
                   placeholder="John Doe"
                   disabled={addingCandidate}
@@ -498,7 +757,9 @@ export function Dashboard() {
                   type="email"
                   value={candidateEmail}
                   onChange={(event) =>
-                    setCandidateEmail(event.target.value)
+                    setCandidateEmail(
+                      event.target.value
+                    )
                   }
                   placeholder="john@example.com"
                   disabled={addingCandidate}
@@ -542,6 +803,7 @@ export function Dashboard() {
         </div>
       )}
 
+      {/* Interview Created Modal */}
       {inviteUrl && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-6">
           <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
@@ -573,7 +835,9 @@ export function Dashboard() {
                 <button
                   type="button"
                   onClick={async () => {
-                    await navigator.clipboard.writeText(inviteUrl);
+                    await navigator.clipboard.writeText(
+                      inviteUrl
+                    );
                   }}
                   className="shrink-0 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
                 >
