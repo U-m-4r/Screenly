@@ -11,6 +11,7 @@ import { DeepgramClient } from "@deepgram/sdk";
 import { evaluateInterview } from "./evaluator";
 import { PreInterviewRequestSchema } from "./types";
 import { prisma } from "./db";
+import { sendInterviewInviteEmail } from "./email";
 
 const app = express();
 
@@ -644,6 +645,9 @@ app.post(
           id: candidateId,
           companyId: membership.companyId,
         },
+        include: {
+          company: true,
+        },
       });
 
       if (!candidate) {
@@ -694,6 +698,28 @@ app.post(
 
       const inviteUrl =
         `http://localhost:3000/candidate/invite/${inviteToken}`;
+
+      // Send the interview invitation email
+      try {
+        await sendInterviewInviteEmail({
+          to: candidate.email,
+          candidateName: candidate.name,
+          companyName: candidate.company.name,
+          inviteUrl,
+          expiresAt: result.invite.expiresAt,
+        });
+
+        console.log(
+          `Interview invite email sent to ${candidate.email}`
+        );
+      } catch (emailError) {
+        // The interview and invite were already created successfully.
+        // Don't fail the interview creation just because email sending failed.
+        console.error(
+          "Interview invite email failed:",
+          emailError
+        );
+      }
 
       return res.status(201).json({
         interview: result.interview,
