@@ -43,7 +43,8 @@ Install dependencies from the repository root:
 bun install
 ```
 
-Create the backend environment file and fill in the values:
+Create the backend environment file and fill in the values. The backend needs
+PostgreSQL plus credentials for Google, GitHub, Deepgram, Groq, and Resend:
 
 ```sh
 cd apps/backend
@@ -67,12 +68,14 @@ bunx prisma generate
 bunx prisma migrate deploy
 ```
 
-Start the backend in one terminal:
+Start the backend in one terminal from `apps/backend`:
 
 ```sh
 cd apps/backend
-bun index.ts
+bun run dev
 ```
+
+Use `bun run start` instead when you do not want file watching.
 
 Start the frontend in another terminal:
 
@@ -90,13 +93,20 @@ The backend example file is [apps/backend/.env.example](apps/backend/.env.exampl
 and the frontend example file is [apps/frontend/.env.example](apps/frontend/.env.example).
 The root `.gitignore` excludes local `.env` files, so never commit credentials.
 
-| Variable           | Description                                            |
-| ------------------ | ------------------------------------------------------ |
-| `DATABASE_URL`     | PostgreSQL connection string used by Prisma            |
-| `GOOGLE_CLIENT_ID` | Google OAuth client ID used to verify sign-in tokens   |
-| `DEEPGRAM_API_KEY` | Deepgram API key used to create temporary audio tokens |
-| `GITHUB_TOKEN`     | GitHub token used to fetch a user's repositories       |
-| `GROQ_API_KEY`     | Groq API key used to evaluate completed interviews     |
+| Variable            | Description                                            |
+| ------------------- | ------------------------------------------------------ |
+| `DATABASE_URL`      | PostgreSQL connection string used by Prisma            |
+| `GOOGLE_CLIENT_ID`  | Google OAuth client ID used to verify sign-in tokens   |
+| `DEEPGRAM_API_KEY`  | Deepgram API key used to create temporary audio tokens |
+| `GITHUB_TOKEN`      | GitHub token used to fetch a user's repositories       |
+| `GROQ_API_KEY`      | Groq API key used to evaluate completed interviews     |
+| `RESEND_API_KEY`    | Resend API key used to send interview invitations      |
+| `RESEND_FROM_EMAIL` | Verified Resend sender used for invitation emails      |
+
+The Resend variables are required for company invitation emails. The sender
+must be verified in Resend. If the backend does not start, first check that
+the database in `DATABASE_URL` is running and reachable, then check for a
+process already using port `3001`.
 
 ## API Endpoints
 

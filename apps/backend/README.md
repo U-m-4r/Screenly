@@ -12,7 +12,7 @@ bun install
 ```
 
 Create `apps/backend/.env` from the example and provide PostgreSQL, Google,
-GitHub, Deepgram, and Groq credentials:
+GitHub, Deepgram, Groq, and Resend credentials:
 
 ```sh
 cp .env.example .env
@@ -28,14 +28,22 @@ bunx prisma migrate deploy
 Start the API and WebSocket server:
 
 ```sh
-bun run index.ts
+bun run dev
 ```
 
-The server listens on `http://localhost:3001`.
+The development server watches for source changes and listens on
+`http://localhost:3001`. Use `bun run start` for a non-watching process.
+
+Before starting the server, make sure PostgreSQL is running and the database
+in `DATABASE_URL` is reachable. The Prisma client must be generated and all
+migrations must be applied after installing dependencies.
 
 `GOOGLE_CLIENT_ID` must be the OAuth 2.0 Web client ID configured for the
 frontend origin. Google sign-in creates an HTTP-only session cookie valid for
 seven days.
+
+`RESEND_FROM_EMAIL` must use a sender address that Resend has verified. The
+Resend variables are only required for company invitation emails.
 
 ## API
 
