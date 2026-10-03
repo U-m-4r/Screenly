@@ -349,15 +349,6 @@ export function Result() {
           </div>
         </section>
 
-        {/* Bottom action */}
-        <div className="flex justify-center pb-8">
-          <button
-            onClick={() => navigate("/")}
-            className="rounded-md border bg-white px-6 py-3 font-medium shadow-sm"
-          >
-            Start New Interview
-          </button>
-        </div>
 
       </div>
     </div>
